@@ -171,7 +171,7 @@ const Home = () => {
             <p className="text-lg text-gray-300 mb-8 leading-relaxed
               max-w-lg animate-fade-up"
               style={{ animationDelay: '0.2s' }}>
-              Book premium turfs, create matches, split costs with
+              Book turfs, courts & sports venues, create matches, split costs with
               players — the BlaBlaCar for sports is here.
             </p>
 
@@ -237,7 +237,7 @@ const Home = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-12 animate-on-scroll">
             <h2 className="section-title mb-3">
-              Every Sport, One Platform
+              Built for easier booking,<br></br> clearer pricing and a better sports experience.
             </h2>
             <p className="section-subtitle max-w-xl mx-auto">
               From football to badminton — find and book turfs for

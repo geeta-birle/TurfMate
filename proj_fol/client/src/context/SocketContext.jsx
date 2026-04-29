@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 
@@ -7,13 +7,25 @@ const SocketContext = createContext(null);
 export const SocketProvider = ({ children }) => {
   const { user } = useAuth();
   const [socket, setSocket] = useState(null);
+  const socketInitialized = useRef(false);
 
   useEffect(() => {
+    // Disconnect if no user
     if (!user) {
-      socket?.disconnect();
-      setSocket(null);
+      if (socket) {
+        socket.disconnect();
+        setSocket(null);
+      }
+      socketInitialized.current = false;
       return;
     }
+
+    // Prevent multiple initializations
+    if (socketInitialized.current) {
+      return;
+    }
+
+    socketInitialized.current = true;
 
     const s = io(import.meta.env.VITE_SOCKET_URL, {
       transports: ['websocket'],

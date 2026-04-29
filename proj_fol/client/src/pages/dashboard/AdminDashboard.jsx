@@ -1,507 +1,415 @@
 import { useState, useEffect } from 'react';
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid,
-  Tooltip, ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, PieChart, Pie, Cell, Legend,
+  AreaChart, Area,
 } from 'recharts';
 import Loader from '../../components/common/Loader';
 import api from '../../services/api';
 
-const COLORS = ['#16a34a','#3b82f6','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
+const PIE_COLORS = ['#16a34a','#3b82f6','#f59e0b','#ef4444','#8b5cf6'];
 
-const AdminDashboard = () => {
-  const [stats, setStats] = useState(null);
+export default function AdminDashboard() {
+  const [stats, setStats]       = useState(null);
   const [analytics, setAnalytics] = useState(null);
-  const [pendingTurfs, setPendingTurfs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [pending, setPending]   = useState([]);
+  const [users, setUsers]       = useState([]);
+  const [bookings, setBookings] = useState([]);
+  const [loading, setLoading]   = useState(true);
   const [activeTab, setActiveTab] = useState('overview');
-  const [actionMsg, setActionMsg] = useState('');
+  const [msg, setMsg]           = useState('');
+  const [search, setSearch]     = useState('');
+  const [roleFilter, setRoleFilter] = useState('');
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchAll(); }, []);
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchAll = async () => {
     try {
-      const [dashRes, analyticsRes, turfsRes] = await Promise.all([
+      const [d, a, t] = await Promise.all([
         api.get('/admin/dashboard'),
-        api.get('/admin/analytics', { params: { period: 7 } }),
-        api.get('/admin/turfs', { params: { is_approved: false } }),
+        api.get('/admin/analytics?period=7'),
+        api.get('/admin/turfs?is_approved=false'),
       ]);
-
-      setStats(dashRes.data.data);
-      setAnalytics(analyticsRes.data.data);
-
-      console.log('Turfs Response:', turfsRes.data); // Debug log
-      
-      const turfsData = turfsRes.data?.data;
-      const normalizedTurfs = Array.isArray(turfsData)
-        ? turfsData
-        : Array.isArray(turfsData?.turfs)
-        ? turfsData.turfs
-        : [];
-      
-      console.log('Normalized Turfs:', normalizedTurfs); // Debug log
-      setPendingTurfs(normalizedTurfs);
-    } catch (error) {
-      console.error('AdminDashboard fetch error:', error);
-      setPendingTurfs([]);
-    } finally {
-      setLoading(false);
-    }
+      setStats(d.data.data);
+      setAnalytics(a.data.data);
+      setPending(t.data.data);
+    } catch {}
+    finally { setLoading(false); }
   };
 
-  const handleTurfAction = async (turfId, approve) => {
-    try {
-      await api.put(`/admin/turfs/${turfId}/status`, {
-        is_approved: approve,
-        is_active: approve,
-        reason: approve ? null : 'Does not meet platform guidelines',
-      });
-      setActionMsg(`Turf ${approve ? 'approved' : 'rejected'} successfully!`);
-      setTimeout(() => setActionMsg(''), 3000);
-      fetchData();
-    } catch {
-      setActionMsg('Action failed. Try again.');
-    }
+  const fetchUsers = async () => {
+    const params = {};
+    if (search) params.search = search;
+    if (roleFilter) params.role = roleFilter;
+    const { data } = await api.get('/admin/users', { params });
+    setUsers(data.data);
   };
 
-  const handleUserAction = async (userId, isActive) => {
-    try {
-      await api.put(`/admin/users/${userId}/status`, {
-        is_active: isActive,
-        reason: isActive ? null : 'Policy violation',
-      });
-      setActionMsg(`User ${isActive ? 'activated' : 'suspended'}.`);
-      setTimeout(() => setActionMsg(''), 3000);
-    } catch {
-      setActionMsg('Action failed.');
-    }
+  const fetchBookings = async () => {
+    const { data } = await api.get('/admin/bookings');
+    setBookings(data.data);
+  };
+
+  useEffect(() => {
+    if (activeTab === 'users') fetchUsers();
+    if (activeTab === 'bookings') fetchBookings();
+  }, [activeTab, search, roleFilter]);
+
+  const toast = (m) => { setMsg(m); setTimeout(() => setMsg(''), 3000); };
+
+  const approveTurf = async (id, approve) => {
+    await api.put(`/admin/turfs/${id}/status`, {
+      is_approved: approve, is_active: approve,
+    });
+    toast(`Turf ${approve ? 'approved ✅' : 'rejected ❌'}`);
+    fetchAll();
+  };
+
+  const toggleUser = async (id, active) => {
+    await api.put(`/admin/users/${id}/status`, { is_active: active });
+    toast(`User ${active ? 'activated ✅' : 'suspended 🚫'}`);
+    fetchUsers();
   };
 
   if (loading) return <Loader center size="lg" />;
-  if (!stats) return (
+  if (!stats)  return (
     <div className="flex items-center justify-center min-h-screen">
-      <p className="text-gray-500">Failed to load dashboard.</p>
+      <p className="text-gray-400">Failed to load dashboard.</p>
     </div>
   );
 
-  const sportData = analytics?.sport_breakdown?.map(s => ({
+  const overviewStats = [
+    { icon: '👥', label: 'Total Users',   value: stats.users.total,
+      sub: `+${stats.users.new_this_month} this month`,
+      color: 'bg-blue-50 text-blue-600' },
+    { icon: '🏟️', label: 'Turfs',         value: stats.turfs.total,
+      sub: `${stats.turfs.pending_approval} pending`,
+      color: 'bg-green-50 text-green-600' },
+    { icon: '📋', label: 'Bookings',       value: stats.bookings.total,
+      sub: `${stats.bookings.confirmed} confirmed`,
+      color: 'bg-purple-50 text-purple-600' },
+    { icon: '💰', label: 'Platform Revenue',
+      value: `₹${parseFloat(stats.revenue.total_platform_revenue)
+        .toLocaleString()}`,
+      sub: `₹${parseFloat(stats.revenue.this_month)
+        .toLocaleString()} this month`,
+      color: 'bg-amber-50 text-amber-600' },
+  ];
+
+  const sportData = (analytics?.sport_breakdown || []).map(s => ({
     name: s.sport_type,
     value: parseInt(s.matches),
-  })) || [];
+  }));
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div className="min-h-screen bg-slate-50">
+      <div className="page-container py-8">
 
-      {/* Header */}
-      <div className="mb-8">
-        <h1 className="text-2xl font-extrabold text-gray-900">
-          Admin Dashboard
-        </h1>
-        <p className="text-gray-500 mt-0.5">Platform overview & management</p>
-      </div>
-
-      {actionMsg && (
-        <div className="bg-green-50 border border-green-200 text-green-700
-          rounded-xl px-4 py-3 mb-5 text-sm">
-          ✅ {actionMsg}
+        {/* Header */}
+        <div className="mb-8">
+          <p className="text-sm text-gray-400 font-medium mb-1">
+            Admin Panel
+          </p>
+          <h1 className="page-title">Platform Overview</h1>
         </div>
-      )}
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-        {[
-          { icon: '👥', label: 'Total Users',
-            value: stats.users.total, sub: `+${stats.users.new_this_month} this month`,
-            color: 'bg-blue-50' },
-          { icon: '🏟️', label: 'Total Turfs',
-            value: stats.turfs.total,
-            sub: `${stats.turfs.pending_approval} pending`,
-            color: 'bg-green-50' },
-          { icon: '📋', label: 'Total Bookings',
-            value: stats.bookings.total,
-            sub: `${stats.bookings.confirmed} confirmed`,
-            color: 'bg-purple-50' },
-          { icon: '💰', label: 'Platform Revenue',
-            value: `₹${parseFloat(stats.revenue.total_platform_revenue)
-              .toLocaleString()}`,
-            sub: `₹${parseFloat(stats.revenue.this_month)
-              .toLocaleString()} this month`,
-            color: 'bg-orange-50' },
-        ].map(s => (
-          <div key={s.label} className="card p-5">
-            <div className={`w-10 h-10 ${s.color} rounded-xl flex
-              items-center justify-center text-xl mb-3`}>
-              {s.icon}
-            </div>
-            <p className="text-2xl font-extrabold text-gray-900">{s.value}</p>
-            <p className="text-sm text-gray-500 mt-0.5">{s.label}</p>
-            <p className="text-xs text-primary-600 font-medium mt-1">{s.sub}</p>
+        {msg && (
+          <div className="alert-success mb-5 animate-fade-up">
+            <span>✅</span> {msg}
           </div>
-        ))}
-      </div>
+        )}
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-6 bg-gray-100 p-1 rounded-xl w-fit
-        overflow-x-auto">
-        {['overview', 'turfs', 'users', 'bookings'].map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`px-5 py-2 rounded-lg text-sm font-semibold
-              capitalize transition-all whitespace-nowrap
-              ${activeTab === tab
-                ? 'bg-white text-gray-900 shadow-sm'
-                : 'text-gray-500 hover:text-gray-700'}`}>
-            {tab}
-            {tab === 'turfs' && pendingTurfs.length > 0 && (
-              <span className="ml-1.5 bg-red-500 text-white text-xs
-                rounded-full px-1.5 py-0.5">
-                {pendingTurfs.length}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-
-      {/* Overview Tab */}
-      {activeTab === 'overview' && (
-        <div className="space-y-6">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Revenue Chart */}
-            <div className="card p-5">
-              <h3 className="font-bold text-gray-900 mb-4">
-                Daily Revenue (7 days)
-              </h3>
-              <ResponsiveContainer width="100%" height={220}>
-                <BarChart data={analytics?.daily_revenue || []}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" />
-                  <XAxis dataKey="date" tick={{ fontSize: 11 }}
-                    tickFormatter={d => new Date(d)
-                      .toLocaleDateString('en-IN', { weekday: 'short' })} />
-                  <YAxis tick={{ fontSize: 11 }}
-                    tickFormatter={v => `₹${v}`} />
-                  <Tooltip
-                    formatter={(v, n) => [
-                      n === 'revenue' ? `₹${v}` : v,
-                      n === 'revenue' ? 'Revenue' : 'Bookings'
-                    ]} />
-                  <Bar dataKey="revenue" fill="#16a34a" radius={[6,6,0,0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
-
-            {/* Sport Breakdown */}
-            <div className="card p-5">
-              <h3 className="font-bold text-gray-900 mb-4">
-                Matches by Sport
-              </h3>
-              {sportData.length > 0 ? (
-                <ResponsiveContainer width="100%" height={220}>
-                  <PieChart>
-                    <Pie data={sportData} cx="50%" cy="50%"
-                      innerRadius={55} outerRadius={85}
-                      paddingAngle={3} dataKey="value">
-                      {sportData.map((_, i) => (
-                        <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                      ))}
-                    </Pie>
-                    <Tooltip formatter={(v, n) => [v, n]} />
-                    <Legend iconType="circle" iconSize={8}
-                      formatter={v => (
-                        <span className="text-xs capitalize text-gray-600">
-                          {v}
-                        </span>
-                      )} />
-                  </PieChart>
-                </ResponsiveContainer>
-              ) : (
-                <div className="flex items-center justify-center h-52">
-                  <p className="text-gray-400 text-sm">No match data yet</p>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Quick Stats Row */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            {[
-              { label: 'Players', value: stats.users.players, icon: '👤' },
-              { label: 'Owners', value: stats.users.owners, icon: '🏟️' },
-              { label: 'Open Matches', value: stats.matches.open, icon: '⚽' },
-              { label: 'Completed', value: stats.matches.completed, icon: '✅' },
-            ].map(s => (
-              <div key={s.label} className="card p-4 text-center">
-                <div className="text-2xl mb-1">{s.icon}</div>
-                <p className="text-xl font-extrabold text-gray-900">{s.value}</p>
-                <p className="text-xs text-gray-500">{s.label}</p>
+        {/* Stats */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+          {overviewStats.map((s, i) => (
+            <div key={s.label}
+              className="stat-card animate-fade-up"
+              style={{ animationDelay: `${i * 0.08}s` }}>
+              <div className={`stat-icon ${s.color}`}>{s.icon}</div>
+              <div>
+                <p className="text-xl font-bold text-gray-900">{s.value}</p>
+                <p className="text-xs text-gray-500 font-medium">{s.label}</p>
+                <p className="text-[10px] text-gray-400 mt-0.5">{s.sub}</p>
               </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Turfs Tab */}
-      {activeTab === 'turfs' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-bold text-gray-900">
-              Pending Approval ({pendingTurfs.length})
-            </h2>
-          </div>
-          {pendingTurfs.length === 0 ? (
-            <div className="text-center py-12 card">
-              <div className="text-4xl mb-2">✅</div>
-              <p className="text-gray-500">All turfs reviewed!</p>
             </div>
-          ) : (
-            pendingTurfs.map(turf => (
+          ))}
+        </div>
+
+        {/* Tabs */}
+        <div className="tabs-bar mb-6 overflow-x-auto">
+          {[
+            { id: 'overview',  label: '📊 Overview' },
+            { id: 'turfs',     label: `🏟️ Pending (${pending.length})` },
+            { id: 'users',     label: '👥 Users' },
+            { id: 'bookings',  label: '📋 Bookings' },
+          ].map(t => (
+            <button key={t.id} onClick={() => setActiveTab(t.id)}
+              className={`tab-btn whitespace-nowrap
+                ${activeTab === t.id ? 'active' : ''}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* OVERVIEW */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+              {/* Revenue Chart */}
+              <div className="card p-5">
+                <h3 className="font-bold text-gray-900 mb-1">
+                  Daily Revenue
+                </h3>
+                <p className="text-xs text-gray-400 mb-5">Last 7 days</p>
+                <ResponsiveContainer width="100%" height={200}>
+                  <AreaChart data={analytics?.daily_revenue || []}>
+                    <defs>
+                      <linearGradient id="adminGrad" x1="0" y1="0"
+                        x2="0" y2="1">
+                        <stop offset="5%" stopColor="#16a34a"
+                          stopOpacity={0.15}/>
+                        <stop offset="95%" stopColor="#16a34a"
+                          stopOpacity={0}/>
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3"
+                      stroke="#f0f0f0" vertical={false}/>
+                    <XAxis dataKey="date" tick={{ fontSize: 11 }}
+                      axisLine={false} tickLine={false}
+                      tickFormatter={d => new Date(d)
+                        .toLocaleDateString('en-IN',
+                          { weekday: 'short' })}/>
+                    <YAxis tick={{ fontSize: 11 }} axisLine={false}
+                      tickLine={false}
+                      tickFormatter={v => `₹${v}`}/>
+                    <Tooltip formatter={v => [`₹${v}`, 'Revenue']}/>
+                    <Area type="monotone" dataKey="revenue"
+                      stroke="#16a34a" strokeWidth={2.5}
+                      fill="url(#adminGrad)" dot={false}/>
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Sport Pie */}
+              <div className="card p-5">
+                <h3 className="font-bold text-gray-900 mb-1">
+                  Matches by Sport
+                </h3>
+                <p className="text-xs text-gray-400 mb-3">
+                  All time breakdown
+                </p>
+                {sportData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <PieChart>
+                      <Pie data={sportData} cx="50%" cy="50%"
+                        innerRadius={50} outerRadius={80}
+                        paddingAngle={3} dataKey="value">
+                        {sportData.map((_, i) => (
+                          <Cell key={i}
+                            fill={PIE_COLORS[i % PIE_COLORS.length]}/>
+                        ))}
+                      </Pie>
+                      <Tooltip/>
+                      <Legend iconType="circle" iconSize={8}
+                        formatter={v => (
+                          <span style={{ fontSize: 12,
+                            textTransform: 'capitalize' }}>{v}</span>
+                        )}/>
+                    </PieChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="flex items-center justify-center h-48">
+                    <p className="text-gray-400 text-sm">
+                      No match data yet
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Platform quick stats */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                { icon: '👤', label: 'Players',     value: stats.users.players },
+                { icon: '🏟️', label: 'Owners',      value: stats.users.owners },
+                { icon: '⚽', label: 'Open Matches', value: stats.matches.open },
+                { icon: '✅', label: 'Completed',    value: stats.matches.completed },
+              ].map(s => (
+                <div key={s.label} className="card p-4 text-center">
+                  <div className="text-2xl mb-2">{s.icon}</div>
+                  <p className="text-2xl font-bold text-gray-900">{s.value}</p>
+                  <p className="text-xs text-gray-400">{s.label}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* PENDING TURFS */}
+        {activeTab === 'turfs' && (
+          <div className="space-y-4">
+            {pending.length === 0 ? (
+              <div className="card p-12 empty-state">
+                <div className="empty-icon">✅</div>
+                <p className="empty-title">All turfs reviewed!</p>
+                <p className="empty-desc">No pending approvals.</p>
+              </div>
+            ) : pending.map(turf => (
               <div key={turf.id} className="card p-5">
                 <div className="flex flex-col sm:flex-row sm:items-start
                   gap-4">
-                  <div className="w-16 h-16 bg-gray-100 rounded-xl
-                    flex items-center justify-center text-3xl flex-shrink-0">
-                    🏟️
+                  <div className="w-full sm:w-24 h-20 sm:h-16 rounded-xl
+                    overflow-hidden bg-gray-100 flex-shrink-0">
+                    <div className="w-full h-full flex items-center
+                      justify-center text-3xl">🏟️</div>
                   </div>
                   <div className="flex-1 min-w-0">
-                    <h3 className="font-bold text-gray-900">{turf.name}</h3>
-                    <p className="text-sm text-gray-500 mt-0.5">
+                    <div className="flex flex-wrap items-center gap-2 mb-1">
+                      <h3 className="font-bold text-gray-900">
+                        {turf.name}
+                      </h3>
+                      <span className="badge-yellow">⏳ Pending Review</span>
+                    </div>
+                    <p className="text-sm text-gray-500">
                       📍 {turf.address}, {turf.city}
                     </p>
-                    <div className="flex flex-wrap gap-3 mt-2 text-xs
-                      text-gray-500">
+                    <div className="flex flex-wrap gap-4 mt-2 text-xs
+                      text-gray-400">
                       <span>👤 {turf.owner_name}</span>
                       <span>📧 {turf.owner_email}</span>
-                      <span>📞 {turf.owner_phone}</span>
                       <span>💰 ₹{turf.price_per_hour}/hr</span>
-                    </div>
-                                       <div className="flex flex-wrap gap-1 mt-2">
-                      {Array.isArray(turf.sport_types)
-                        ? turf.sport_types.map(s => (
-                            <span key={s} className="badge bg-primary-50
-                              text-primary-700 capitalize text-xs">{s}</span>
-                          ))
-                        : typeof turf.sport_types === 'string'
-                        ? turf.sport_types.split(',').map(s => (
-                            <span key={s.trim()} className="badge bg-primary-50
-                              text-primary-700 capitalize text-xs">{s.trim()}</span>
-                          ))
-                        : null
-                      }
-                      {Array.isArray(turf.amenities)
-                        ? turf.amenities.map(a => (
-                            <span key={a} className="badge bg-gray-100
-                              text-gray-600 capitalize text-xs">{a}</span>
-                          ))
-                        : typeof turf.amenities === 'string'
-                        ? turf.amenities.split(',').map(a => (
-                            <span key={a.trim()} className="badge bg-gray-100
-                              text-gray-600 capitalize text-xs">{a.trim()}</span>
-                          ))
-                        : null
-                      }
                     </div>
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
-                    <button
-                     onClick={() => handleTurfAction(turf.id, true)}
-                      className="bg-green-500 hover:bg-green-600 text-white
-                        font-semibold px-4 py-2 rounded-xl text-sm
-                        transition-colors">
+                    <button onClick={() => approveTurf(turf.id, true)}
+                      className="btn-primary text-sm py-2 px-4
+                        bg-green-600">
                       ✓ Approve
                     </button>
-                    <button
-                      onClick={() => handleTurfAction(turf.id, false)}
-                      className="bg-red-100 hover:bg-red-200 text-red-600
-                        font-semibold px-4 py-2 rounded-xl text-sm
-                        transition-colors">
+                    <button onClick={() => approveTurf(turf.id, false)}
+                      className="btn-danger text-sm py-2 px-4">
                       ✕ Reject
                     </button>
                   </div>
                 </div>
               </div>
-            ))
-          )}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
 
-      {/* Users Tab */}
-      {activeTab === 'users' && (
-        <UserManagement onAction={handleUserAction} />
-      )}
-
-      {/* Bookings Tab */}
-      {activeTab === 'bookings' && (
-        <BookingManagement />
-      )}
-    </div>
-  );
-};
-
-// ── Sub Components ────────────────────────────────────────
-
-const UserManagement = ({ onAction }) => {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [search, setSearch] = useState('');
-  const [roleFilter, setRoleFilter] = useState('');
-
-  useEffect(() => { fetchUsers(); }, [search, roleFilter]);
-
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const params = {};
-      if (search) params.search = search;
-      if (roleFilter) params.role = roleFilter;
-      const { data } = await api.get('/admin/users', { params });
-      setUsers(data.data);
-    } catch {}
-    finally { setLoading(false); }
-  };
-
-  return (
-    <div>
-      <div className="flex gap-3 mb-5">
-        <input type="text" placeholder="Search name or email..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="input flex-1" />
-        <select value={roleFilter}
-          onChange={e => setRoleFilter(e.target.value)}
-          className="input w-36">
-          <option value="">All Roles</option>
-          <option value="player">Player</option>
-          <option value="owner">Owner</option>
-          <option value="admin">Admin</option>
-        </select>
-      </div>
-
-      {loading ? <Loader center /> : (
-        <div className="space-y-3">
-          {users.map(u => (
-            <div key={u.id} className="card p-4 flex items-center gap-4">
-              <div className="w-10 h-10 rounded-full bg-primary-100 flex
-                items-center justify-center font-bold text-primary-700
-                flex-shrink-0">
-                {u.name?.charAt(0)}
+        {/* USERS */}
+        {activeTab === 'users' && (
+          <div>
+            <div className="flex gap-3 mb-5">
+              <div className="relative flex-1">
+                <svg className="absolute left-3 top-1/2 -translate-y-1/2
+                  w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24"
+                  stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round"
+                    strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0
+                    11-14 0 7 7 0 0114 0z"/>
+                </svg>
+                <input type="text" placeholder="Search name or email..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  className="input pl-10" />
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="font-semibold text-gray-900 text-sm">
-                    {u.name}
-                  </p>
-                  <span className={`badge text-xs capitalize
-                    ${u.role === 'admin' ? 'bg-purple-100 text-purple-700'
-                      : u.role === 'owner' ? 'bg-blue-100 text-blue-700'
-                      : 'bg-gray-100 text-gray-600'}`}>
-                    {u.role}
-                  </span>
-                  {!u.is_active && (
-                    <span className="badge bg-red-100 text-red-700 text-xs">
-                      Suspended
-                    </span>
+              <select value={roleFilter}
+                onChange={e => setRoleFilter(e.target.value)}
+                className="input w-36">
+                <option value="">All Roles</option>
+                <option value="player">Player</option>
+                <option value="owner">Owner</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+
+            <div className="space-y-3">
+              {users.map(u => (
+                <div key={u.id} className="card p-4 flex items-center
+                  gap-4">
+                  <div className="w-10 h-10 bg-green-600 rounded-xl flex
+                    items-center justify-center text-white font-bold
+                    text-sm flex-shrink-0">
+                    {u.name?.charAt(0).toUpperCase()}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <p className="font-semibold text-gray-900 text-sm">
+                        {u.name}
+                      </p>
+                      <span className={
+                        u.role === 'admin' ? 'badge-purple'
+                        : u.role === 'owner' ? 'badge-blue'
+                        : 'badge-gray'}>
+                        {u.role}
+                      </span>
+                      {!u.is_active && (
+                        <span className="badge-red">Suspended</span>
+                      )}
+                    </div>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      {u.email} ·{' '}
+                      {u.total_bookings} bookings
+                    </p>
+                  </div>
+                  {u.role !== 'admin' && (
+                    <button
+                      onClick={() => toggleUser(u.id, !u.is_active)}
+                      className={`text-xs font-semibold px-3 py-1.5
+                        rounded-lg transition-colors flex-shrink-0
+                        ${u.is_active
+                          ? 'bg-red-50 hover:bg-red-100 text-red-600 border border-red-200'
+                          : 'bg-green-50 hover:bg-green-100 text-green-600 border border-green-200'}`}>
+                      {u.is_active ? 'Suspend' : 'Activate'}
+                    </button>
                   )}
                 </div>
-                <p className="text-xs text-gray-500 mt-0.5">{u.email}</p>
-                <p className="text-xs text-gray-400">
-                  {u.total_bookings} bookings · Joined{' '}
-                  {new Date(u.created_at).toLocaleDateString('en-IN',
-                    { month: 'short', year: 'numeric' })}
-                </p>
-              </div>
-              <div className="flex gap-2 flex-shrink-0">
-                {u.role !== 'admin' && (
-                  <button
-                    onClick={() => onAction(u.id, !u.is_active)}
-                    className={`text-xs font-semibold px-3 py-1.5 rounded-lg
-                      transition-colors
-                      ${u.is_active
-                        ? 'bg-red-100 hover:bg-red-200 text-red-600'
-                        : 'bg-green-100 hover:bg-green-200 text-green-600'}`}>
-                    {u.is_active ? 'Suspend' : 'Activate'}
-                  </button>
-                )}
-              </div>
+              ))}
             </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-};
+          </div>
+        )}
 
-const BookingManagement = () => {
-  const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [statusFilter, setStatusFilter] = useState('');
-
-  useEffect(() => { fetchBookings(); }, [statusFilter]);
-
-  const fetchBookings = async () => {
-    setLoading(true);
-    try {
-      const params = statusFilter ? { status: statusFilter } : {};
-      const { data } = await api.get('/admin/bookings', { params });
-      setBookings(data.data);
-    } catch {}
-    finally { setLoading(false); }
-  };
-
-  return (
-    <div>
-      <div className="flex gap-2 mb-5 overflow-x-auto pb-1">
-        {['', 'pending', 'confirmed', 'cancelled', 'completed'].map(s => (
-          <button key={s} onClick={() => setStatusFilter(s)}
-            className={`px-4 py-2 rounded-full text-sm font-semibold
-              whitespace-nowrap border transition-all capitalize
-              ${statusFilter === s
-                ? 'bg-primary-600 text-white border-primary-600'
-                : 'bg-white text-gray-600 border-gray-200'}`}>
-            {s || 'All'}
-          </button>
-        ))}
-      </div>
-
-      {loading ? <Loader center /> : (
-        <div className="space-y-3">
-          {bookings.map(b => (
-            <div key={b.id} className="card p-4 flex items-center gap-4">
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2 mb-1">
-                  <p className="font-semibold text-gray-900 text-sm">
-                    {b.turf_name}
+        {/* BOOKINGS */}
+        {activeTab === 'bookings' && (
+          <div className="space-y-3">
+            {bookings.map(b => (
+              <div key={b.id} className="card p-4 flex items-center gap-4">
+                <div className="flex-1 min-w-0">
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
+                    <p className="font-semibold text-gray-900 text-sm">
+                      {b.turf_name}
+                    </p>
+                    <span className={b.status === 'confirmed'
+                      ? 'badge-green' : b.status === 'pending'
+                      ? 'badge-yellow' : b.status === 'cancelled'
+                      ? 'badge-red' : 'badge-blue'}>
+                      {b.status}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    👤 {b.organizer_name} ·
+                    📅 {new Date(b.date).toLocaleDateString('en-IN', {
+                      day: 'numeric', month: 'short', year: 'numeric'
+                    })}
+                    {' · ⏰ '}{b.start_time?.slice(0,5)}
                   </p>
-                  <span className={`badge text-xs capitalize
-                    ${b.status === 'confirmed'
-                      ? 'bg-green-100 text-green-700'
-                      : b.status === 'pending'
-                      ? 'bg-yellow-100 text-yellow-700'
-                      : b.status === 'cancelled'
-                      ? 'bg-red-100 text-red-700'
-                      : 'bg-blue-100 text-blue-700'}`}>
-                    {b.status}
-                  </span>
                 </div>
-                <p className="text-xs text-gray-500">
-                  👤 {b.organizer_name} · 📅{' '}
-                  {new Date(b.date).toLocaleDateString('en-IN',
-                    { day: 'numeric', month: 'short' })}
-                  {' · ⏰ '}{b.start_time?.slice(0,5)}
-                </p>
+                <div className="text-right flex-shrink-0">
+                  <p className="font-bold text-gray-900 text-sm">
+                    ₹{(parseFloat(b.total_amount) +
+                      parseFloat(b.platform_fee)).toLocaleString()}
+                  </p>
+                  <p className="text-[10px] text-gray-400">
+                    Fee: ₹{parseFloat(b.platform_fee).toLocaleString()}
+                  </p>
+                </div>
               </div>
-              <div className="text-right flex-shrink-0">
-                <p className="font-bold text-gray-900 text-sm">
-                  ₹{(parseFloat(b.total_amount) +
-                    parseFloat(b.platform_fee)).toLocaleString()}
-                </p>
-                <p className="text-xs text-gray-400">
-                  Fee: ₹{parseFloat(b.platform_fee).toLocaleString()}
-                </p>
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
-};
-
-export default AdminDashboard;
+}
