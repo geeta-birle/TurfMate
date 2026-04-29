@@ -4,6 +4,7 @@ import { turfService } from '../../services/turfService';
 import { bookingService } from '../../services/bookingService';
 import { useAuth } from '../../context/AuthContext';
 import Loader from '../../components/common/Loader';
+import ReviewForm from '../../components/turf/ReviewForm';
 
 const DAYS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
@@ -21,6 +22,16 @@ const TurfDetail = () => {
   const [booking, setBooking] = useState(false);
   const [activeImage, setActiveImage] = useState(0);
   const [error, setError] = useState('');
+
+  // Add this helper function at top of TurfDetail.jsx
+    const getGoogleMapsUrl = (turf) => {
+      if (turf.lat && turf.lng) {
+        return `https://www.google.com/maps/dir/?api=1&destination=${turf.lat},${turf.lng}`;
+      }
+      const query = encodeURIComponent(`${turf.name}, ${turf.address}, ${turf.city}`);
+      return `https://www.google.com/maps/search/?api=1&query=${query}`;
+    };
+
 
   // Generate next 7 days
   const next7Days = Array.from({ length: 7 }, (_, i) => {
@@ -161,6 +172,34 @@ const handleBookSlot = async () => {
                 <div className="text-sm text-gray-400">per hour</div>
               </div>
             </div>
+            {/* After the address paragraph */}
+            <div className="flex flex-wrap gap-3 mt-4">
+              <a
+                href={getGoogleMapsUrl(turf)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-blue-50 hover:bg-blue-100
+                  text-blue-700 font-semibold px-4 py-2.5 rounded-xl border
+                  border-blue-200 transition-all duration-200 text-sm hover:shadow-md">
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z"/>
+                </svg>
+                Get Directions
+              </a>
+
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${turf.name} ${turf.address} ${turf.city}`)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-2 bg-gray-50 hover:bg-gray-100
+                  text-gray-700 font-semibold px-4 py-2.5 rounded-xl border
+                  border-gray-200 transition-all duration-200 text-sm">
+                <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                  <path d="M20.5 3l-.16.03L15 5.1 9 3 3.36 4.9c-.21.07-.36.25-.36.48V20.5c0 .28.22.5.5.5l.16-.03L9 18.9l6 2.1 5.64-1.9c.21-.07.36-.25.36-.48V3.5c0-.28-.22-.5-.5-.5zM15 19l-6-2.11V5l6 2.11V19z"/>
+                </svg>
+                View on Map
+              </a>
+            </div>
 
             {/* Rating */}
             {turf.avg_rating > 0 && (
@@ -231,43 +270,120 @@ const handleBookSlot = async () => {
             </div>
           </div>
 
-          {/* Reviews */}
-          {turf.reviews?.length > 0 && (
-            <div className="card p-6">
-              <h3 className="font-bold text-gray-900 mb-4">
-                Reviews ({turf.total_reviews})
+          {/* Reviews Section */}
+          <div className="card p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-gray-900 text-lg">
+                Reviews
+                {turf.total_reviews > 0 && (
+                  <span className="ml-2 text-gray-400 font-normal text-base">
+                    ({turf.total_reviews})
+                  </span>
+                )}
               </h3>
-              <div className="space-y-4">
+              {/* Overall Rating */}
+              {turf.avg_rating > 0 && (
+                <div className="flex items-center gap-2 bg-primary-50
+                  px-3 py-1.5 rounded-xl">
+                  <span className="text-yellow-500 text-lg">★</span>
+                  <span className="font-extrabold text-gray-900">
+                    {parseFloat(turf.avg_rating).toFixed(1)}
+                  </span>
+                  <span className="text-gray-400 text-sm">/ 5</span>
+                </div>
+              )}
+            </div>
+
+            {/* Rating Breakdown */}
+            {turf.reviews?.length > 0 && (
+              <div className="mb-6 p-4 bg-gray-50 rounded-xl">
+                <div className="space-y-2">
+                  {[5,4,3,2,1].map(star => {
+                    const count = turf.reviews.filter(
+                      r => r.rating === star).length;
+                    const percent = turf.reviews.length
+                      ? (count / turf.reviews.length) * 100 : 0;
+                    return (
+                      <div key={star} className="flex items-center gap-3">
+                        <span className="text-xs text-gray-500 w-3">
+                          {star}
+                        </span>
+                        <span className="text-yellow-400 text-xs">★</span>
+                        <div className="flex-1 bg-gray-200 rounded-full h-2">
+                          <div
+                            className="bg-yellow-400 h-2 rounded-full
+                              transition-all duration-500"
+                            style={{ width: `${percent}%` }}
+                          />
+                        </div>
+                        <span className="text-xs text-gray-400 w-4">
+                          {count}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
+            {/* Write Review Form */}
+            <ReviewForm
+              turfId={id}
+              user={user}
+              onReviewSubmitted={fetchTurf}
+            />
+
+            {/* Reviews List */}
+            {turf.reviews?.length === 0 ? (
+              <div className="text-center py-8">
+                <div className="text-4xl mb-2">💬</div>
+                <p className="text-gray-400 text-sm">
+                  No reviews yet. Be the first to review!
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-4 mt-6">
                 {turf.reviews.map(r => (
                   <div key={r.id} className="flex gap-3 pb-4
                     border-b border-gray-100 last:border-0">
-                    <div className="w-9 h-9 rounded-full bg-gray-100 flex
-                      items-center justify-center font-semibold text-gray-600
-                      text-sm flex-shrink-0">
-                      {r.reviewer_name?.charAt(0)}
+                    <div className="w-9 h-9 rounded-full bg-primary-100
+                      flex items-center justify-center font-semibold
+                      text-primary-700 text-sm flex-shrink-0">
+                      {r.reviewer_name?.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1">
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-semibold text-gray-900 text-sm">
                           {r.reviewer_name}
                         </span>
-                        <div className="flex">
-                          {[1,2,3,4,5].map(i => (
-                            <span key={i} className={`text-sm
-                              ${i <= r.rating
-                                ? 'text-yellow-400' : 'text-gray-200'}`}>★</span>
-                          ))}
-                        </div>
+                        <span className="text-xs text-gray-400">
+                          {new Date(r.created_at).toLocaleDateString('en-IN', {
+                            day: 'numeric', month: 'short', year: 'numeric',
+                          })}
+                        </span>
+                      </div>
+                      {/* Stars */}
+                      <div className="flex gap-0.5 mb-1.5">
+                        {[1,2,3,4,5].map(i => (
+                          <span key={i} className={`text-sm
+                            ${i <= r.rating
+                              ? 'text-yellow-400'
+                              : 'text-gray-200'}`}>
+                            ★
+                          </span>
+                        ))}
                       </div>
                       {r.comment && (
-                        <p className="text-sm text-gray-600">{r.comment}</p>
+                        <p className="text-sm text-gray-600 leading-relaxed">
+                          {r.comment}
+                        </p>
                       )}
                     </div>
                   </div>
                 ))}
               </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         {/* ── Right Column: Booking Widget ────────────── */}

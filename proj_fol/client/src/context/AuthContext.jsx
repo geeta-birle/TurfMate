@@ -47,9 +47,10 @@ export const AuthProvider = ({ children }) => {
   };
 
   const updateUser = (updates) => setUser(prev => ({ ...prev, ...updates }));
+  const isEmailVerified = user?.is_verified || false;
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser }}>
+    <AuthContext.Provider value={{ user, loading, login, register, logout, updateUser, isEmailVerified }}>
       {children}
     </AuthContext.Provider>
   );

@@ -150,6 +150,26 @@ const Navbar = () => {
           </div>
         </div>
 
+      {/* Email verification banner */}
+      {user && !user.is_verified && (
+        <div className="bg-yellow-500 text-white text-center py-2 px-4
+          text-sm font-medium">
+          📧 Please verify your email address.{' '}
+          <button
+            onClick={async () => {
+              try {
+                await api.post('/auth/resend-verification',
+                  { email: user.email });
+                alert('Verification email sent! Check your inbox.');
+              } catch {
+                alert('Failed to send. Try again.');
+              }
+            }}
+            className="underline font-bold hover:text-yellow-100">
+            Resend verification email
+          </button>
+        </div>
+)}
         {/* Mobile Nav */}
         {menuOpen && (
           <div className="md:hidden border-t border-gray-100 py-2">

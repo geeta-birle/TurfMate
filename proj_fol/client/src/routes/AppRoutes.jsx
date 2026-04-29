@@ -2,6 +2,10 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ProtectedRoute from '../components/common/ProtectedRoute';
 
+import VerifyEmail     from '../pages/auth/VerifyEmail';
+import ForgotPassword  from '../pages/auth/ForgotPassword';
+import ResetPassword   from '../pages/auth/ResetPassword';
+
 import Home            from '../pages/Home';
 import Login           from '../pages/auth/Login';
 import Register        from '../pages/auth/Register';
@@ -114,7 +118,9 @@ const AppRoutes = () => {
           <AdminDashboard />
         </ProtectedRoute>
       } />
-
+      <Route path="/verify-email" element={<VerifyEmail />} />
+      <Route path="/forgot-password" element={<ForgotPassword />} />
+      <Route path="/reset-password" element={<ResetPassword />} />
       {/* ── 404 ─────────────────────────────────── */}
       <Route path="*" element={
         <div className="flex flex-col items-center justify-center

@@ -19,20 +19,37 @@ const AdminDashboard = () => {
   useEffect(() => { fetchData(); }, []);
 
   const fetchData = async () => {
+    setLoading(true);
     try {
       const [dashRes, analyticsRes, turfsRes] = await Promise.all([
         api.get('/admin/dashboard'),
-        api.get('/admin/analytics?period=7'),
-        api.get('/admin/turfs?is_approved=false'),
+        api.get('/admin/analytics', { params: { period: 7 } }),
+        api.get('/admin/turfs', { params: { is_approved: false } }),
       ]);
+
       setStats(dashRes.data.data);
       setAnalytics(analyticsRes.data.data);
-      setPendingTurfs(turfsRes.data.data);
-    } catch {}
-    finally { setLoading(false); }
+
+      console.log('Turfs Response:', turfsRes.data); // Debug log
+      
+      const turfsData = turfsRes.data?.data;
+      const normalizedTurfs = Array.isArray(turfsData)
+        ? turfsData
+        : Array.isArray(turfsData?.turfs)
+        ? turfsData.turfs
+        : [];
+      
+      console.log('Normalized Turfs:', normalizedTurfs); // Debug log
+      setPendingTurfs(normalizedTurfs);
+    } catch (error) {
+      console.error('AdminDashboard fetch error:', error);
+      setPendingTurfs([]);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const handleTurfAction = async (turfId, ownerId, approve) => {
+  const handleTurfAction = async (turfId, approve) => {
     try {
       await api.put(`/admin/turfs/${turfId}/status`, {
         is_approved: approve,
@@ -255,27 +272,43 @@ const AdminDashboard = () => {
                       <span>📞 {turf.owner_phone}</span>
                       <span>💰 ₹{turf.price_per_hour}/hr</span>
                     </div>
-                    <div className="flex flex-wrap gap-1 mt-2">
-                      {turf.sport_types?.map(s => (
-                        <span key={s} className="badge bg-primary-50
-                          text-primary-700 capitalize text-xs">{s}</span>
-                      ))}
-                      {turf.amenities?.map(a => (
-                        <span key={a} className="badge bg-gray-100
-                          text-gray-600 capitalize text-xs">{a}</span>
-                      ))}
+                                       <div className="flex flex-wrap gap-1 mt-2">
+                      {Array.isArray(turf.sport_types)
+                        ? turf.sport_types.map(s => (
+                            <span key={s} className="badge bg-primary-50
+                              text-primary-700 capitalize text-xs">{s}</span>
+                          ))
+                        : typeof turf.sport_types === 'string'
+                        ? turf.sport_types.split(',').map(s => (
+                            <span key={s.trim()} className="badge bg-primary-50
+                              text-primary-700 capitalize text-xs">{s.trim()}</span>
+                          ))
+                        : null
+                      }
+                      {Array.isArray(turf.amenities)
+                        ? turf.amenities.map(a => (
+                            <span key={a} className="badge bg-gray-100
+                              text-gray-600 capitalize text-xs">{a}</span>
+                          ))
+                        : typeof turf.amenities === 'string'
+                        ? turf.amenities.split(',').map(a => (
+                            <span key={a.trim()} className="badge bg-gray-100
+                              text-gray-600 capitalize text-xs">{a.trim()}</span>
+                          ))
+                        : null
+                      }
                     </div>
                   </div>
                   <div className="flex gap-2 flex-shrink-0">
                     <button
-                      onClick={() => handleTurfAction(turf.id, turf.owner_id, true)}
+                     onClick={() => handleTurfAction(turf.id, true)}
                       className="bg-green-500 hover:bg-green-600 text-white
                         font-semibold px-4 py-2 rounded-xl text-sm
                         transition-colors">
                       ✓ Approve
                     </button>
                     <button
-                      onClick={() => handleTurfAction(turf.id, turf.owner_id, false)}
+                      onClick={() => handleTurfAction(turf.id, false)}
                       className="bg-red-100 hover:bg-red-200 text-red-600
                         font-semibold px-4 py-2 rounded-xl text-sm
                         transition-colors">

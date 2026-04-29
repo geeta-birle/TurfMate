@@ -4,12 +4,16 @@ const { body } = require('express-validator');
 const {
   register,
   login,
-  refreshToken,
+  verifyEmail,
+  resendVerification,
+  forgotPassword,
+  resetPassword,
   getMe,
   logout,
   updateProfile,
   changePassword,
 } = require('../controllers/authController');
+
 const { protect } = require('../middleware/authMiddleware');
 
 // Validation rules
@@ -31,17 +35,15 @@ const registerValidation = [
     .withMessage('Role must be player or owner'),
 ];
 
-const loginValidation = [
-  body('email').isEmail().withMessage('Valid email required').normalizeEmail(),
-  body('password').notEmpty().withMessage('Password is required'),
-];
-
 router.post('/register', registerValidation, register);
-router.post('/login', loginValidation, login);
-router.post('/refresh-token', refreshToken);
-router.get('/me', protect, getMe);
+router.post('/login', login);
 router.post('/logout', protect, logout);
+router.get('/me', protect, getMe);
 router.put('/profile', protect, updateProfile);
 router.put('/change-password', protect, changePassword);
+router.get('/verify-email/:token', verifyEmail);
+router.post('/resend-verification', resendVerification);
+router.post('/forgot-password', forgotPassword);
+router.post('/reset-password', resetPassword);
 
 module.exports = router;

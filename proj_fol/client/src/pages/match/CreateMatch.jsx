@@ -27,21 +27,33 @@ const CreateMatch = () => {
     description: '',
     cost_per_player: '',
   });
-
   useEffect(() => {
-    if (bookingId) fetchBooking();
-  }, [bookingId]);
+  if (bookingId) {
+    setForm(prev => ({ ...prev, booking_id: bookingId }));
+    fetchBooking();
+  } else {
+    setLoading(false);
+  }
+}, [bookingId]);
+  
+const fetchBooking = async () => {
+  try {
+    const { data } = await bookingService.getOne(bookingId);
+    const b = data.data;
+    setBooking(b);
 
-  const fetchBooking = async () => {
-    try {
-      const { data } = await bookingService.getOne(bookingId);
-      setBooking(data.data);
-    } catch {
-      setError('Booking not found or not confirmed.');
-    } finally {
-      setLoading(false);
+    // Validate booking is confirmed + paid
+    if (b.status !== 'confirmed') {
+      setError(
+        `Booking is ${b.status}. Please complete payment first.`
+      );
     }
-  };
+  } catch {
+    setError('Booking not found or not authorized.');
+  } finally {
+    setLoading(false);
+  }
+};
 
   const handleChange = e => {
     const { name, value } = e.target;

@@ -12,6 +12,7 @@ const Login = () => {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const successMessage = location.state?.message;
 
   const handleChange = (e) => {
     setForm(prev => ({ ...prev, [e.target.name]: e.target.value }));
@@ -61,7 +62,13 @@ const Login = () => {
               <span>⚠️</span> {error}
             </div>
           )}
-
+                    
+          {successMessage && (
+            <div className="bg-green-50 border border-green-200 text-green-700
+              rounded-xl px-4 py-3 mb-5 text-sm">
+              ✅ {successMessage}
+            </div>
+          )}
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
               <label className="block text-sm font-semibold text-gray-700 mb-1.5">
@@ -76,6 +83,13 @@ const Login = () => {
               <label className="block text-sm font-semibold text-gray-700 mb-1.5">
                 Password
               </label>
+              <div className="text-right">
+                <Link to="/forgot-password"
+                  className="text-sm text-primary-600 hover:text-primary-700
+                    font-medium">
+                  Forgot password?
+                </Link>
+              </div>
               <div className="relative">
                 <input type={showPassword ? 'text' : 'password'}
                   name="password" value={form.password}

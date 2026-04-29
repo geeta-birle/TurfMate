@@ -79,11 +79,12 @@ const createMatch = async (req, res, next) => {
     );
 
     // Add organizer as confirmed player
-    await client.query(
-      `INSERT INTO match_players (match_id, player_id, status, payment_status)
-       VALUES ($1, $2, 'confirmed', 'paid')`,
-      [match.rows[0].id, req.user.id]
-    );
+// Add organizer as confirmed player
+await client.query(
+  `INSERT INTO match_players (match_id, player_id, status, payment_status)
+   VALUES ($1, $2, 'confirmed', 'success')`,
+  [match.rows[0].id, req.user.id]
+);
 
     await client.query('COMMIT');
 

@@ -55,6 +55,88 @@ const emailTemplates = {
     `,
   }),
 
+  // Add inside emailTemplates object:
+
+verifyEmail: (name, verifyUrl) => ({
+  subject: 'Verify Your TurfMate Account 📧',
+  html: `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;
+      margin: 0 auto; padding: 20px;">
+      <div style="background: #16a34a; padding: 30px; border-radius:
+        12px 12px 0 0; text-align: center;">
+        <h1 style="color: white; margin: 0; font-size: 28px;">TurfMate</h1>
+        <p style="color: #bbf7d0; margin: 8px 0 0;">Community Sports Platform</p>
+      </div>
+      <div style="background: white; padding: 30px; border: 1px solid #e5e7eb;
+        border-top: none; border-radius: 0 0 12px 12px;">
+        <h2 style="color: #111827; margin-top: 0;">
+          Hi ${name}! Verify your email 👋
+        </h2>
+        <p style="color: #6b7280; line-height: 1.6;">
+          Thanks for joining TurfMate! Click the button below to verify
+          your email address and activate your account.
+        </p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${verifyUrl}"
+            style="background: #16a34a; color: white; padding: 14px 32px;
+              text-decoration: none; border-radius: 8px; font-weight: bold;
+              font-size: 16px; display: inline-block;">
+            ✅ Verify Email Address
+          </a>
+        </div>
+        <p style="color: #9ca3af; font-size: 14px;">
+          This link expires in <strong>24 hours</strong>.
+          If you didn't create an account, ignore this email.
+        </p>
+        <hr style="border: none; border-top: 1px solid #e5e7eb;
+          margin: 20px 0;" />
+        <p style="color: #9ca3af; font-size: 12px;">
+          Or copy this link: <br/>
+          <span style="color: #16a34a; word-break: break-all;">
+            ${verifyUrl}
+          </span>
+        </p>
+      </div>
+    </div>
+  `,
+}),
+
+resetPassword: (name, resetUrl) => ({
+  subject: 'Reset Your TurfMate Password 🔒',
+  html: `
+    <div style="font-family: Arial, sans-serif; max-width: 600px;
+      margin: 0 auto; padding: 20px;">
+      <div style="background: #16a34a; padding: 30px; border-radius:
+        12px 12px 0 0; text-align: center;">
+        <h1 style="color: white; margin: 0; font-size: 28px;">TurfMate</h1>
+      </div>
+      <div style="background: white; padding: 30px; border: 1px solid #e5e7eb;
+        border-top: none; border-radius: 0 0 12px 12px;">
+        <h2 style="color: #111827; margin-top: 0;">
+          Password Reset Request 🔑
+        </h2>
+        <p style="color: #6b7280; line-height: 1.6;">
+          Hi ${name}, we received a request to reset your TurfMate password.
+          Click the button below to create a new password.
+        </p>
+        <div style="text-align: center; margin: 30px 0;">
+          <a href="${resetUrl}"
+            style="background: #16a34a; color: white; padding: 14px 32px;
+              text-decoration: none; border-radius: 8px; font-weight: bold;
+              font-size: 16px; display: inline-block;">
+            🔒 Reset Password
+          </a>
+        </div>
+        <p style="color: #9ca3af; font-size: 14px;">
+          This link expires in <strong>1 hour</strong>.
+          If you didn't request this, ignore this email.
+          Your password will remain unchanged.
+        </p>
+      </div>
+    </div>
+  `,
+}),
+
   matchInvite: (name, matchTitle, inviteCode) => ({
     subject: `You're invited to join "${matchTitle}" — TurfMate`,
     html: `
