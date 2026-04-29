@@ -22,6 +22,9 @@ const TurfDetail = () => {
   const [booking, setBooking] = useState(false);
   const [activeImage, setActiveImage] = useState(0);
   const [error, setError] = useState('');
+  const [editingReviewId, setEditingReviewId] = useState(null);
+  const [editRating, setEditRating] = useState(5);
+  const [editComment, setEditComment] = useState('');
 
   // Add this helper function at top of TurfDetail.jsx
     const getGoogleMapsUrl = (turf) => {
@@ -88,6 +91,36 @@ const handleBookSlot = async () => {
     const [h, m] = t.split(':');
     const hour = parseInt(h);
     return `${hour > 12 ? hour - 12 : hour || 12}:${m} ${hour >= 12 ? 'PM' : 'AM'}`;
+  };
+
+  const handleEditReview = (review) => {
+    setEditingReviewId(review.id);
+    setEditRating(review.rating);
+    setEditComment(review.comment || '');
+  };
+
+  const handleSaveReview = async () => {
+    if (!editComment.trim()) return;
+    try {
+      await turfService.updateReview(id, editingReviewId, {
+        rating: editRating,
+        comment: editComment.trim(),
+      });
+      setEditingReviewId(null);
+      await fetchTurf();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to update review.');
+    }
+  };
+
+  const handleDeleteReview = async (reviewId) => {
+    if (!window.confirm('Are you sure you want to delete this review?')) return;
+    try {
+      await turfService.deleteReview(id, reviewId);
+      await fetchTurf();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to delete review.');
+    }
   };
 
   if (loading) return <Loader center size="lg" />;
@@ -352,31 +385,106 @@ const handleBookSlot = async () => {
                       {r.reviewer_name?.charAt(0).toUpperCase()}
                     </div>
                     <div className="flex-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="font-semibold text-gray-900 text-sm">
-                          {r.reviewer_name}
-                        </span>
-                        <span className="text-xs text-gray-400">
-                          {new Date(r.created_at).toLocaleDateString('en-IN', {
-                            day: 'numeric', month: 'short', year: 'numeric',
-                          })}
-                        </span>
-                      </div>
-                      {/* Stars */}
-                      <div className="flex gap-0.5 mb-1.5">
-                        {[1,2,3,4,5].map(i => (
-                          <span key={i} className={`text-sm
-                            ${i <= r.rating
-                              ? 'text-yellow-400'
-                              : 'text-gray-200'}`}>
-                            ★
-                          </span>
-                        ))}
-                      </div>
-                      {r.comment && (
-                        <p className="text-sm text-gray-600 leading-relaxed">
-                          {r.comment}
-                        </p>
+                      {editingReviewId === r.id ? (
+                        // Edit Form
+                        <div className="bg-gray-50 p-4 rounded-lg">
+                          <div className="mb-3">
+                            <label className="block text-sm font-semibold text-gray-700 mb-2">
+                              Rating
+                            </label>
+                            <div className="flex gap-2">
+                              {[1, 2, 3, 4, 5].map((star) => (
+                                <button
+                                  key={star}
+                                  type="button"
+                                  onClick={() => setEditRating(star)}
+                                  className="text-2xl transition-all hover:scale-110"
+                                >
+                                  <span
+                                    className={
+                                      star <= editRating ? 'text-yellow-400' : 'text-gray-300'
+                                    }
+                                  >
+                                    ★
+                                  </span>
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                          <textarea
+                            value={editComment}
+                            onChange={(e) => setEditComment(e.target.value)}
+                            placeholder="Update your review..."
+                            rows="3"
+                            className="w-full px-3 py-2 border border-gray-300 rounded-lg
+                              focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none text-sm"
+                          />
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={handleSaveReview}
+                              className="flex-1 bg-primary-600 text-white py-1.5 rounded-lg
+                                hover:bg-primary-700 font-medium text-sm transition-all"
+                            >
+                              Save
+                            </button>
+                            <button
+                              onClick={() => setEditingReviewId(null)}
+                              className="flex-1 bg-gray-200 text-gray-700 py-1.5 rounded-lg
+                                hover:bg-gray-300 font-medium text-sm transition-all"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center justify-between mb-1">
+                            <span className="font-semibold text-gray-900 text-sm">
+                              {r.reviewer_name}
+                            </span>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-400">
+                                {new Date(r.created_at).toLocaleDateString('en-IN', {
+                                  day: 'numeric', month: 'short', year: 'numeric',
+                                })}
+                              </span>
+                              {user && user.id === r.reviewer_id && (
+                                <div className="flex gap-1">
+                                  <button
+                                    onClick={() => handleEditReview(r)}
+                                    className="text-xs text-primary-600 hover:text-primary-700
+                                      font-semibold transition-colors"
+                                  >
+                                    ✏️
+                                  </button>
+                                  <button
+                                    onClick={() => handleDeleteReview(r.id)}
+                                    className="text-xs text-red-600 hover:text-red-700
+                                      font-semibold transition-colors"
+                                  >
+                                    🗑️
+                                  </button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                          {/* Stars */}
+                          <div className="flex gap-0.5 mb-1.5">
+                            {[1,2,3,4,5].map(i => (
+                              <span key={i} className={`text-sm
+                                ${i <= r.rating
+                                  ? 'text-yellow-400'
+                                  : 'text-gray-200'}`}>
+                                ★
+                              </span>
+                            ))}
+                          </div>
+                          {r.comment && (
+                            <p className="text-sm text-gray-600 leading-relaxed">
+                              {r.comment}
+                            </p>
+                          )}
+                        </>
                       )}
                     </div>
                   </div>

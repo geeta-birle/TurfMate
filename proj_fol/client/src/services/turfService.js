@@ -12,4 +12,6 @@ export const turfService = {
   generateSlots: (id, data) => api.post(`/turfs/${id}/slots/generate`, data),
   updateSlot:    (turfId, slotId, data) => api.put(`/turfs/${turfId}/slots/${slotId}`, data),
   addReview:     (id, data) => api.post(`/turfs/${id}/review`, data),
+  updateReview:  (id, reviewId, data) => api.put(`/turfs/${id}/review/${reviewId}`, data),
+  deleteReview:  (id, reviewId) => api.delete(`/turfs/${id}/review/${reviewId}`),
 };
