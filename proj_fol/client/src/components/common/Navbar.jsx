@@ -178,6 +178,7 @@ export default function Navbar() {
                           { icon: '📋', label: 'My Bookings',   to: '/bookings/my' },
                           { icon: '🏆', label: 'My Matches',    to: '/matches/my' },
                           { icon: '🔔', label: 'Notifications', to: '/notifications' },
+                          { icon: '💰', label: 'My Wallet', to: '/wallet' },
                         ].map(item => (
                           <Link key={item.to} to={item.to}
                             onClick={() => setProfileOpen(false)}

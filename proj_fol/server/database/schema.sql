@@ -128,6 +128,71 @@ CREATE TABLE payments (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- WALLETS TABLE (for wallet system)
+CREATE TABLE wallets (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    user_id UUID NOT NULL UNIQUE REFERENCES users(id) ON DELETE CASCADE,
+    balance DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    locked_balance DECIMAL(12, 2) NOT NULL DEFAULT 0.00,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_wallets_user ON wallets(user_id);
+
+-- WALLET TRANSACTIONS TABLE (audit trail)
+CREATE TABLE wallet_transactions (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    wallet_id UUID NOT NULL REFERENCES wallets(id) ON DELETE CASCADE,
+    user_id UUID NOT NULL REFERENCES users(id),
+    type VARCHAR(20) NOT NULL,  -- 'debit' | 'credit'
+    category VARCHAR(50) NOT NULL,  -- 'topup', 'match_join', 'match_refund', 'settlement_to_owner', 'settlement_platform_fee', 'cancellation_penalty', 'booking_payment', 'initial_balance'
+    amount DECIMAL(12, 2) NOT NULL,
+    balance_before DECIMAL(12, 2) NOT NULL,
+    balance_after DECIMAL(12, 2) NOT NULL,
+    reference_id UUID,  -- Links to match_id, booking_id, etc.
+    reference_type VARCHAR(50),  -- 'match' | 'booking' | 'wallet_topup'
+    description TEXT,
+    metadata JSONB,
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_wallet_transactions_user ON wallet_transactions(user_id);
+CREATE INDEX idx_wallet_transactions_wallet ON wallet_transactions(wallet_id);
+CREATE INDEX idx_wallet_transactions_category ON wallet_transactions(category);
+CREATE INDEX idx_wallet_transactions_created ON wallet_transactions(created_at DESC);
+
+-- MATCH PAYMENTS TABLE (tracks player payments for a match)
+CREATE TABLE match_payments (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    match_id UUID NOT NULL REFERENCES matches(id) ON DELETE CASCADE,
+    player_id UUID NOT NULL REFERENCES users(id),
+    amount DECIMAL(10, 2) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'held',  -- 'held' | 'released' | 'refunded'
+    txn_id UUID REFERENCES wallet_transactions(id),
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(match_id, player_id)
+);
+CREATE INDEX idx_match_payments_match ON match_payments(match_id);
+CREATE INDEX idx_match_payments_player ON match_payments(player_id);
+CREATE INDEX idx_match_payments_status ON match_payments(status);
+
+-- SETTLEMENTS TABLE (match settlement records)
+CREATE TABLE settlements (
+    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
+    match_id UUID NOT NULL REFERENCES matches(id),
+    booking_id UUID NOT NULL REFERENCES bookings(id),
+    total_collected DECIMAL(12, 2) NOT NULL,
+    platform_fee DECIMAL(12, 2) NOT NULL,
+    owner_amount DECIMAL(12, 2) NOT NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',  -- 'pending' | 'completed' | 'failed'
+    settled_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX idx_settlements_match ON settlements(match_id);
+CREATE INDEX idx_settlements_booking ON settlements(booking_id);
+CREATE INDEX idx_settlements_status ON settlements(status);
+
 -- REVIEWS TABLE
 CREATE TABLE reviews (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),

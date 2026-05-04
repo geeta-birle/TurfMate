@@ -69,6 +69,13 @@ export default function PlayerDashboard() {
       desc: 'Update your details',      color: 'border-purple-200 hover:border-purple-400 hover:bg-purple-50' },
     { icon: '🔔', label: 'Notifications', to: '/notifications',
       desc: 'View all updates',         color: 'border-orange-200 hover:border-orange-400 hover:bg-orange-50' },
+      { icon: '💰', label: 'My Wallet',
+      to: '/wallet',
+      desc: 'Balance & transactions',
+      color: 'border-emerald-200 hover:border-emerald-400 hover:bg-emerald-50' },
+      { icon: '↩️', label: 'My Refunds',   to: '/refunds/my',
+  desc: 'View refund history',
+  color: 'border-amber-200 hover:border-amber-400 hover:bg-amber-50' },
   ];
 
   return (

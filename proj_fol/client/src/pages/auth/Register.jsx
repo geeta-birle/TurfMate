@@ -48,11 +48,13 @@ export default function Register() {
 
   const handleSubmit = async e => {
     e.preventDefault();
+    if (!form.phone.trim()) { setError('Phone number is required.'); return; }
+    if (form.phone.length !== 10) { setError('Phone number must be 10 digits.'); return; }
+    if (!/^\d{10}$/.test(form.phone)) { setError('Phone number must contain only digits.'); return; }
     if (!form.city.trim()) { setError('City is required.'); return; }
     setLoading(true);
     try {
-      const { confirmPassword, ...data } = form;
-      await register(data);
+      await register(form);
       navigate('/dashboard');
     } catch (err) {
       setError(err.response?.data?.message || 'Registration failed.');

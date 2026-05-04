@@ -4,7 +4,7 @@ const { body, query } = require('express-validator');
 const {
   createTurf, getTurfs, getTurf, updateTurf,
   deleteTurf, getSlots, addSlots, generateSlots,
-  updateSlot, getMyTurfs, addReview,
+  updateSlot, getMyTurfs, addReview, updateReview, deleteReview,
 } = require('../controllers/turfController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -33,5 +33,7 @@ router.put('/:id/slots/:slotId', protect, authorize('owner'), updateSlot);
 
 // Player (must have completed booking)
 router.post('/:id/review', protect, authorize('player'), addReview);
+router.put('/:id/review/:reviewId', protect, authorize('player'), updateReview);
+router.delete('/:id/review/:reviewId', protect, authorize('player'), deleteReview);
 
 module.exports = router;

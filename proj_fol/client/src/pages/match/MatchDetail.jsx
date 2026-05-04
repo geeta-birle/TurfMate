@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { matchService } from '../../services/matchService';
+import { refundService } from '../../services/refundService';
 import { useAuth } from '../../context/AuthContext';
 import { useSocket } from '../../context/SocketContext';
 import ChatWindow from '../../components/chat/ChatWindow';
@@ -21,15 +22,15 @@ const MatchDetail = () => {
   const [loading, setLoading] = useState(true);
   const [joining, setJoining] = useState(false);
   const [leaving, setLeaving] = useState(false);
+  const [refunding, setRefunding] = useState(false);
   const [inviteCode, setInviteCode] = useState('');
   const [showInviteInput, setShowInviteInput] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [activeTab, setActiveTab] = useState('details');
+  const [pendingRefunds, setPendingRefunds] = useState([]);
 
-  useEffect(() => {
-    fetchMatch();
-  }, [id]);
+  useEffect(() => { fetchMatch(); }, [id]);
 
   useEffect(() => {
     if (!match || !socket) return;
@@ -59,6 +60,17 @@ const MatchDetail = () => {
     };
   }, [match?.id, socket]);
 
+  // Fetch pending refunds when organizer opens refunds tab
+  useEffect(() => {
+    if (activeTab === 'refunds' && isOrganizer) {
+      refundService.getPending()
+        .then(({ data }) => setPendingRefunds(
+          data.data.filter(r => r.match_id === id)
+        ))
+        .catch(() => {});
+    }
+  }, [activeTab]);
+
   const fetchMatch = async () => {
     try {
       const { data } = await matchService.getOne(id);
@@ -71,10 +83,10 @@ const MatchDetail = () => {
   };
 
   const isOrganizer = user && match?.organizer_id === user.id;
-  const isPlayer = match?.players?.some(p => p.player_id === user?.id);
-  const isPending = match?.pending_requests?.some(p => p.player_id === user?.id);
-  const spotsLeft = match ? match.team_size - match.current_players : 0;
-  const isMember = isOrganizer || isPlayer;
+  const isPlayer    = match?.players?.some(p => p.player_id === user?.id);
+  const isPending   = match?.pending_requests?.some(p => p.player_id === user?.id);
+  const spotsLeft   = match ? match.team_size - match.current_players : 0;
+  const isMember    = isOrganizer || isPlayer;
 
   const handleJoin = async () => {
     if (!user) { navigate('/login'); return; }
@@ -98,6 +110,7 @@ const MatchDetail = () => {
   const handleLeave = async () => {
     if (!window.confirm('Are you sure you want to leave this match?')) return;
     setLeaving(true);
+    setError('');
     try {
       await matchService.leave(id);
       setSuccess('You left the match.');
@@ -109,11 +122,49 @@ const MatchDetail = () => {
     }
   };
 
+  const handleRefund = async () => {
+    if (!window.confirm(
+      'Request a refund? The match organizer will need to approve it. ' +
+      'You\'ll receive 80% back if approved (10% platform fee + 10% cancellation penalty deducted).'
+    )) return;
+    setRefunding(true);
+    setError('');
+    try {
+      const { data } = await refundService.request({
+        match_id: id,
+        reason: 'Player requested refund',
+      });
+      setSuccess(
+        `Refund request submitted! ₹${data.data.refund_amount} will be ` +
+        `credited once the organizer approves.`
+      );
+      fetchMatch();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Refund request failed.');
+    } finally {
+      setRefunding(false);
+    }
+  };
+
   const handleRequest = async (playerId, action) => {
     try {
       await matchService.handleRequest(id, playerId, { action });
       setSuccess(`Player ${action}d successfully.`);
       fetchMatch();
+    } catch (err) {
+      setError(err.response?.data?.message || 'Action failed.');
+    }
+  };
+
+  const handleRefundReview = async (requestId, action, refundAmount) => {
+    try {
+      await refundService.review(requestId, action);
+      setSuccess(
+        action === 'approve'
+          ? `Refund of ₹${parseFloat(refundAmount).toLocaleString()} approved.`
+          : 'Refund request rejected.'
+      );
+      setPendingRefunds(prev => prev.filter(r => r.id !== requestId));
     } catch (err) {
       setError(err.response?.data?.message || 'Action failed.');
     }
@@ -149,6 +200,11 @@ const MatchDetail = () => {
 
   const fillPercent = (match.current_players / match.team_size) * 100;
 
+  // Build tabs dynamically
+  const tabs = ['details', 'players'];
+  if (isOrganizer && match.pending_requests?.length > 0) tabs.push('requests');
+  if (isOrganizer) tabs.push('refunds');
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
 
@@ -158,9 +214,7 @@ const MatchDetail = () => {
         <span>›</span>
         <Link to="/matches" className="hover:text-primary-600">Matches</Link>
         <span>›</span>
-        <span className="text-gray-900 font-medium truncate">
-          {match.title}
-        </span>
+        <span className="text-gray-900 font-medium truncate">{match.title}</span>
       </nav>
 
       {/* Alerts */}
@@ -197,13 +251,10 @@ const MatchDetail = () => {
                     {match.title}
                   </h1>
                   <span className={`badge font-semibold capitalize
-                    ${match.status === 'open'
-                      ? 'bg-green-100 text-green-700'
-                      : match.status === 'full'
-                      ? 'bg-red-100 text-red-700'
-                      : match.status === 'cancelled'
-                      ? 'bg-gray-100 text-gray-600'
-                      : 'bg-blue-100 text-blue-700'}`}>
+                    ${match.status === 'open'      ? 'bg-green-100 text-green-700'
+                    : match.status === 'full'      ? 'bg-red-100 text-red-700'
+                    : match.status === 'cancelled' ? 'bg-gray-100 text-gray-600'
+                    : 'bg-blue-100 text-blue-700'}`}>
                     {match.status}
                   </span>
                   <span className={`badge font-semibold capitalize
@@ -241,9 +292,7 @@ const MatchDetail = () => {
               ].map(item => (
                 <div key={item.label} className="bg-gray-50 rounded-xl p-3">
                   <div className="text-lg mb-1">{item.icon}</div>
-                  <div className="text-xs text-gray-500 mb-0.5">
-                    {item.label}
-                  </div>
+                  <div className="text-xs text-gray-500 mb-0.5">{item.label}</div>
                   <div className="text-sm font-semibold text-gray-900 truncate">
                     {item.value}
                   </div>
@@ -265,8 +314,8 @@ const MatchDetail = () => {
               <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
                 <div className={`h-full rounded-full transition-all duration-500
                   ${fillPercent >= 100 ? 'bg-red-400'
-                    : fillPercent >= 75 ? 'bg-yellow-400'
-                    : 'bg-primary-500'}`}
+                  : fillPercent >= 75  ? 'bg-yellow-400'
+                  : 'bg-primary-500'}`}
                   style={{ width: `${Math.min(fillPercent, 100)}%` }} />
               </div>
             </div>
@@ -282,12 +331,7 @@ const MatchDetail = () => {
           {/* Tabs */}
           <div className="card overflow-hidden">
             <div className="flex border-b border-gray-100">
-              {[
-                'details',
-                'players',
-                ...(isOrganizer && match.pending_requests?.length > 0
-                  ? ['requests'] : []),
-              ].map(tab => (
+              {tabs.map(tab => (
                 <button key={tab} onClick={() => setActiveTab(tab)}
                   className={`flex-1 py-3.5 text-sm font-semibold capitalize
                     transition-colors border-b-2 -mb-px
@@ -301,13 +345,19 @@ const MatchDetail = () => {
                       {match.pending_requests.length}
                     </span>
                   )}
+                  {tab === 'refunds' && pendingRefunds.length > 0 && (
+                    <span className="ml-1.5 bg-amber-500 text-white text-xs
+                      rounded-full px-1.5 py-0.5">
+                      {pendingRefunds.length}
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
 
             <div className="p-5">
 
-              {/* Details Tab */}
+              {/* ── Details Tab ── */}
               {activeTab === 'details' && (
                 <div className="space-y-4">
                   <div className="flex items-center gap-3 p-3 bg-gray-50
@@ -338,9 +388,7 @@ const MatchDetail = () => {
                       </p>
                     </div>
                     <div className="bg-gray-50 rounded-xl p-3">
-                      <p className="text-gray-500 text-xs mb-1">
-                        Invite Code
-                      </p>
+                      <p className="text-gray-500 text-xs mb-1">Invite Code</p>
                       <p className="font-bold text-primary-600 text-lg
                         tracking-widest">
                         {isMember ? match.invite_code : '••••••'}
@@ -350,7 +398,7 @@ const MatchDetail = () => {
                 </div>
               )}
 
-              {/* Players Tab */}
+              {/* ── Players Tab ── */}
               {activeTab === 'players' && (
                 <div className="space-y-3">
                   {match.players?.length === 0 ? (
@@ -387,7 +435,7 @@ const MatchDetail = () => {
                 </div>
               )}
 
-              {/* Requests Tab */}
+              {/* ── Join Requests Tab ── */}
               {activeTab === 'requests' && isOrganizer && (
                 <div className="space-y-3">
                   {match.pending_requests?.length === 0 ? (
@@ -433,10 +481,104 @@ const MatchDetail = () => {
                   )}
                 </div>
               )}
+
+              {/* ── Refund Requests Tab ── */}
+              {activeTab === 'refunds' && isOrganizer && (
+                <div className="space-y-3">
+                  {pendingRefunds.length === 0 ? (
+                    <p className="text-gray-400 text-sm text-center py-4">
+                      No pending refund requests
+                    </p>
+                  ) : (
+                    pendingRefunds.map(r => (
+                      <div key={r.id} className="p-4 rounded-xl bg-amber-50
+                        border border-amber-200">
+                        <div className="flex items-center justify-between
+                          gap-3 mb-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-9 h-9 rounded-full bg-amber-100
+                              flex items-center justify-center font-bold
+                              text-amber-700 text-sm flex-shrink-0">
+                              {r.player_name?.charAt(0)}
+                            </div>
+                            <div>
+                              <p className="font-semibold text-gray-900 text-sm">
+                                {r.player_name}
+                              </p>
+                              <p className="text-xs text-gray-500">
+                                Requesting ₹{parseFloat(r.refund_amount)
+                                  .toLocaleString()} refund
+                              </p>
+                            </div>
+                          </div>
+                          <p className="font-bold text-gray-900 text-sm
+                            flex-shrink-0">
+                            ₹{parseFloat(r.amount).toLocaleString()} paid
+                          </p>
+                        </div>
+
+                        {/* Breakdown */}
+                        <div className="grid grid-cols-3 gap-2 text-center
+                          text-xs mb-3">
+                          <div className="bg-green-50 rounded-lg p-2">
+                            <p className="text-green-700 font-bold">
+                              ₹{parseFloat(r.refund_amount).toLocaleString()}
+                            </p>
+                            <p className="text-gray-500 mt-0.5">To player (80%)</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-2">
+                            <p className="text-gray-700 font-bold">
+                              ₹{parseFloat(r.platform_fee).toLocaleString()}
+                            </p>
+                            <p className="text-gray-500 mt-0.5">Platform (10%)</p>
+                          </div>
+                          <div className="bg-gray-50 rounded-lg p-2">
+                            <p className="text-gray-700 font-bold">
+                              ₹{parseFloat(r.penalty_amount).toLocaleString()}
+                            </p>
+                            <p className="text-gray-500 mt-0.5">Penalty (10%)</p>
+                          </div>
+                        </div>
+
+                        {r.reason && (
+                          <p className="text-xs text-gray-500 italic mb-3">
+                            Reason: "{r.reason}"
+                          </p>
+                        )}
+
+                        <div className="bg-amber-100 rounded-lg px-3 py-2
+                          text-xs text-amber-700 mb-3">
+                          ⚠️ Approving will debit ₹{parseFloat(r.amount)
+                            .toLocaleString()} from your wallet.
+                        </div>
+
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => handleRefundReview(
+                              r.id, 'approve', r.refund_amount
+                            )}
+                            className="flex-1 bg-green-500 hover:bg-green-600
+                              text-white text-xs font-semibold px-3 py-2
+                              rounded-lg transition-colors">
+                            ✓ Approve Refund
+                          </button>
+                          <button
+                            onClick={() => handleRefundReview(r.id, 'reject')}
+                            className="flex-1 bg-red-100 hover:bg-red-200
+                              text-red-600 text-xs font-semibold px-3 py-2
+                              rounded-lg transition-colors">
+                            ✕ Reject
+                          </button>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Chat Window — only for members */}
+          {/* Chat — members only */}
           {isMember && (
             <ChatWindow matchId={id} matchStatus={match.status} />
           )}
@@ -499,14 +641,30 @@ const MatchDetail = () => {
                     ⏳ Request pending approval
                   </div>
                 )}
+
                 {isPlayer && !isPending && (
-                  <button onClick={handleLeave} disabled={leaving}
-                    className="w-full py-3 bg-red-50 hover:bg-red-100
-                      text-red-600 font-semibold rounded-xl border
-                      border-red-200 transition-colors">
-                    {leaving ? 'Leaving...' : 'Leave Match'}
-                  </button>
+                  <div className="space-y-3">
+                    <button onClick={handleLeave} disabled={leaving}
+                      className="w-full py-3 bg-red-50 hover:bg-red-100
+                        text-red-600 font-semibold rounded-xl border
+                        border-red-200 transition-colors">
+                      {leaving ? 'Leaving...' : '🚪 Leave Match'}
+                    </button>
+
+                    {parseFloat(match.cost_per_player) > 0
+                      && !['completed', 'cancelled'].includes(match.status) && (
+                      <button onClick={handleRefund} disabled={refunding}
+                        className="w-full py-3 bg-amber-50 hover:bg-amber-100
+                          text-amber-700 font-semibold rounded-xl border
+                          border-amber-200 transition-colors text-sm">
+                        {refunding
+                          ? 'Submitting...'
+                          : '↩️ Request Refund (80% back)'}
+                      </button>
+                    )}
+                  </div>
                 )}
+
                 {!isPlayer && !isPending
                   && match.status !== 'cancelled'
                   && match.status !== 'completed' && (
@@ -542,11 +700,11 @@ const MatchDetail = () => {
             <h3 className="font-bold text-gray-900 mb-4">Match Info</h3>
             <div className="space-y-3 text-sm">
               {[
-                { label: 'Sport', value: match.sport_type, style: 'capitalize' },
+                { label: 'Sport',       value: match.sport_type,  style: 'capitalize' },
                 { label: 'Skill Level', value: match.skill_level, style: 'capitalize' },
-                { label: 'Team Size', value: `${match.team_size} players` },
-                { label: 'Spots Left', value: spotsLeft === 0 ? 'Full' : `${spotsLeft} spots` },
-                { label: 'Visibility', value: match.visibility, style: 'capitalize' },
+                { label: 'Team Size',   value: `${match.team_size} players` },
+                { label: 'Spots Left',  value: spotsLeft === 0 ? 'Full' : `${spotsLeft} spots` },
+                { label: 'Visibility',  value: match.visibility,  style: 'capitalize' },
                 {
                   label: 'Cost/Player',
                   value: match.cost_per_player > 0
@@ -585,4 +743,5 @@ const MatchDetail = () => {
     </div>
   );
 };
+
 export default MatchDetail;

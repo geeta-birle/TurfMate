@@ -1,6 +1,7 @@
 const { Server } = require('socket.io');
 
 let io;
+const { verifyAccessToken } = require('../utils/jwt');
 
 const initSocket = (httpServer) => {
   io = new Server(httpServer, {
@@ -13,6 +14,20 @@ const initSocket = (httpServer) => {
 
   io.on('connection', (socket) => {
     console.log(`🔌 Socket connected: ${socket.id}`);
+
+    // Log and verify auth token if provided
+    const token = socket.handshake?.auth?.token;
+    if (token) {
+      try {
+        const payload = verifyAccessToken(token);
+        socket.user = payload;
+        // auto-join user's notification room
+        socket.join(`user:${payload.id}`);
+        console.log(`Socket ${socket.id} authenticated as user:${payload.id}`);
+      } catch (err) {
+        console.log(`Socket auth failed for ${socket.id}:`, err.message);
+      }
+    }
 
     // Join match room
     socket.on('join_match_room', ({ matchId }) => {
@@ -39,8 +54,8 @@ const initSocket = (httpServer) => {
       });
     });
 
-    socket.on('disconnect', () => {
-      console.log(`🔌 Socket disconnected: ${socket.id}`);
+    socket.on('disconnect', (reason) => {
+      console.log(`🔌 Socket disconnected: ${socket.id} — reason: ${reason}`);
     });
   });
 

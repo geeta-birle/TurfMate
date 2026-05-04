@@ -478,7 +478,7 @@ const addReview = async (req, res, next) => {
       `SELECT b.id FROM bookings b
        JOIN time_slots ts ON b.slot_id = ts.id
        WHERE ts.turf_id = $1 AND b.organizer_id = $2
-       AND b.status = 'completed' LIMIT 1`,
+       AND b.status IN ('confirmed', 'completed') LIMIT 1`,
       [id, req.user.id]
     );
 
@@ -531,6 +531,129 @@ const addReview = async (req, res, next) => {
   }
 };
 
+// @desc    Update review
+// @route   PUT /api/turfs/:id/review/:reviewId
+// @access  Private (review owner)
+const updateReview = async (req, res, next) => {
+  try {
+    const { id, reviewId } = req.params;
+    const { rating, comment } = req.body;
+
+    // Check if review exists and belongs to user
+    const reviewCheck = await query(
+      `SELECT id FROM reviews
+       WHERE id = $1 AND reviewer_id = $2 AND target_id = $3 AND target_type = 'turf'`,
+      [reviewId, req.user.id, id]
+    );
+
+    if (!reviewCheck.rows.length)
+      return res.status(404).json({
+        success: false,
+        message: 'Review not found or you do not have permission to edit it.',
+      });
+
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      const review = await client.query(
+        `UPDATE reviews SET rating = $1, comment = $2
+         WHERE id = $3
+         RETURNING *`,
+        [rating, comment, reviewId]
+      );
+
+      // Recalculate turf ratings
+      await client.query(
+        `UPDATE turfs SET
+          avg_rating = (
+            SELECT ROUND(AVG(rating)::numeric, 2)
+            FROM reviews WHERE target_id = $1 AND target_type = 'turf'
+          )
+         WHERE id = $1`,
+        [id]
+      );
+
+      await client.query('COMMIT');
+
+      res.status(200).json({
+        success: true,
+        message: 'Review updated.',
+        data: review.rows[0],
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    next(err);
+  }
+};
+
+// @desc    Delete review
+// @route   DELETE /api/turfs/:id/review/:reviewId
+// @access  Private (review owner)
+const deleteReview = async (req, res, next) => {
+  try {
+    const { id, reviewId } = req.params;
+
+    // Check if review exists and belongs to user
+    const reviewCheck = await query(
+      `SELECT id FROM reviews
+       WHERE id = $1 AND reviewer_id = $2 AND target_id = $3 AND target_type = 'turf'`,
+      [reviewId, req.user.id, id]
+    );
+
+    if (!reviewCheck.rows.length)
+      return res.status(404).json({
+        success: false,
+        message: 'Review not found or you do not have permission to delete it.',
+      });
+
+    const client = await getClient();
+    try {
+      await client.query('BEGIN');
+
+      // Delete the review
+      await client.query(
+        `DELETE FROM reviews WHERE id = $1`,
+        [reviewId]
+      );
+
+      // Recalculate turf ratings
+      await client.query(
+        `UPDATE turfs SET
+          avg_rating = (
+            SELECT ROUND(AVG(rating)::numeric, 2)
+            FROM reviews WHERE target_id = $1 AND target_type = 'turf'
+          ),
+          total_reviews = (
+            SELECT COUNT(*) FROM reviews
+            WHERE target_id = $1 AND target_type = 'turf'
+          )
+         WHERE id = $1`,
+        [id]
+      );
+
+      await client.query('COMMIT');
+
+      res.status(200).json({
+        success: true,
+        message: 'Review deleted.',
+      });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
+  } catch (err) {
+    next(err);
+  }
+};
+
 module.exports = {
   createTurf,
   getTurfs,
@@ -543,4 +666,6 @@ module.exports = {
   updateSlot,
   getMyTurfs,
   addReview,
+  updateReview,
+  deleteReview,
 };

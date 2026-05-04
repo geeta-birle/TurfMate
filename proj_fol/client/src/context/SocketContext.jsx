@@ -27,11 +27,14 @@ export const SocketProvider = ({ children }) => {
 
     socketInitialized.current = true;
 
+    const token = localStorage.getItem('accessToken');
     const s = io(import.meta.env.VITE_SOCKET_URL, {
-      transports: ['websocket'],
+      // allow polling fallback which is more robust in some dev environments
       reconnection: true,
-      reconnectionAttempts: 5,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
+      auth: { token },
+      withCredentials: true,
     });
 
     s.on('connect', () => {
@@ -39,8 +42,8 @@ export const SocketProvider = ({ children }) => {
       s.emit('join_user_room', { userId: user.id });
     });
 
-    s.on('disconnect', () => {
-      console.log('🔌 Socket disconnected');
+    s.on('disconnect', (reason) => {
+      console.log('🔌 Socket disconnected:', reason);
     });
 
     s.on('connect_error', (err) => {

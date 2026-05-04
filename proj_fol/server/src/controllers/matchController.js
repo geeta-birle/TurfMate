@@ -3,9 +3,11 @@ const { generateInviteCode, getPagination, paginationMeta } = require('../utils/
 const { validationResult } = require('express-validator');
 const { getIO } = require('../config/socket');
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Create match (after confirmed booking)
 // @route   POST /api/matches
 // @access  Private
+// ─────────────────────────────────────────────────────────────
 const createMatch = async (req, res, next) => {
   const client = await getClient();
   try {
@@ -79,12 +81,11 @@ const createMatch = async (req, res, next) => {
     );
 
     // Add organizer as confirmed player
-// Add organizer as confirmed player
-await client.query(
-  `INSERT INTO match_players (match_id, player_id, status, payment_status)
-   VALUES ($1, $2, 'confirmed', 'success')`,
-  [match.rows[0].id, req.user.id]
-);
+    await client.query(
+      `INSERT INTO match_players (match_id, player_id, status, payment_status)
+       VALUES ($1, $2, 'confirmed', 'success')`,
+      [match.rows[0].id, req.user.id]
+    );
 
     await client.query('COMMIT');
 
@@ -104,9 +105,11 @@ await client.query(
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Discover open matches
 // @route   GET /api/matches
 // @access  Public
+// ─────────────────────────────────────────────────────────────
 const getMatches = async (req, res, next) => {
   try {
     const {
@@ -180,9 +183,11 @@ const getMatches = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Get single match detail
 // @route   GET /api/matches/:id
 // @access  Public
+// ─────────────────────────────────────────────────────────────
 const getMatch = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -239,18 +244,21 @@ const getMatch = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Join match by ID or invite code
 // @route   POST /api/matches/:id/join
 // @access  Private (player)
+// ─────────────────────────────────────────────────────────────
 const joinMatch = async (req, res, next) => {
   const client = await getClient();
   try {
     const { id } = req.params;
     const { invite_code } = req.body;
+    const playerId = req.user.id;
 
     await client.query('BEGIN');
 
-    // Find match — support join by ID or invite code
+    // Lock match row — support join by ID or invite code
     const matchResult = await client.query(
       `SELECT m.*, b.organizer_id,
         ts.date, ts.start_time, t.name as turf_name
@@ -270,7 +278,7 @@ const joinMatch = async (req, res, next) => {
 
     const match = matchResult.rows[0];
 
-    // Validate match state
+    // ── Validations ────────────────────────────────────────
     if (match.status === 'cancelled' || match.status === 'completed') {
       await client.query('ROLLBACK');
       return res.status(400).json({
@@ -287,7 +295,6 @@ const joinMatch = async (req, res, next) => {
       });
     }
 
-    // Check private match — must have invite code
     if (match.visibility === 'private' && match.invite_code !== invite_code) {
       await client.query('ROLLBACK');
       return res.status(403).json({
@@ -296,8 +303,7 @@ const joinMatch = async (req, res, next) => {
       });
     }
 
-    // Can't join own match
-    if (match.organizer_id === req.user.id) {
+    if (match.organizer_id === playerId) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
@@ -305,12 +311,12 @@ const joinMatch = async (req, res, next) => {
       });
     }
 
-    // Check already joined
+    // Prevent double-join (idempotency guard)
     const alreadyJoined = await client.query(
-      'SELECT id, status FROM match_players WHERE match_id = $1 AND player_id = $2',
-      [match.id, req.user.id]
+      `SELECT id, status FROM match_players
+       WHERE match_id = $1 AND player_id = $2`,
+      [match.id, playerId]
     );
-
     if (alreadyJoined.rows.length) {
       await client.query('ROLLBACK');
       return res.status(409).json({
@@ -321,19 +327,75 @@ const joinMatch = async (req, res, next) => {
       });
     }
 
-    // Add player — auto confirm if open, else pending
+    // Prevent double-payment (extra safety)
+    const alreadyPaid = await client.query(
+      `SELECT id FROM match_payments
+       WHERE match_id = $1 AND player_id = $2`,
+      [match.id, playerId]
+    );
+    if (alreadyPaid.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'Payment already processed for this match.',
+      });
+    }
+
+    // ── Wallet payment ─────────────────────────────────────
+    const costPerPlayer = parseFloat(match.cost_per_player || 0);
+    let paymentResult = null;
+
+    if (costPerPlayer > 0) {
+      const { debitWallet, creditWallet } = require('../services/walletService');
+
+      // debitWallet handles the FOR UPDATE lock + insufficient balance check
+      const playerTxn = await debitWallet(
+        client, playerId, costPerPlayer,
+        'match_join', match.id, 'match',
+        `Joined match: ${match.title}`,
+        { match_id: match.id, creator_id: match.organizer_id }
+      );
+
+      const creatorTxn = await creditWallet(
+        client, match.organizer_id, costPerPlayer,
+        'match_join', match.id, 'match',
+        `Player joined your match: ${match.title}`,
+        { match_id: match.id, player_id: playerId }
+      );
+
+      const matchPaymentResult = await client.query(
+        `INSERT INTO match_payments
+          (match_id, player_id, amount, status, txn_id)
+         VALUES ($1, $2, $3, 'held', $4)
+         RETURNING *`,
+        [match.id, playerId, costPerPlayer, playerTxn.id]
+      );
+
+      paymentResult = {
+        match_payment: matchPaymentResult.rows[0],
+        amount_paid: costPerPlayer,
+        player_txn: playerTxn,
+        creator_txn: creatorTxn,
+      };
+    }
+
+    // ── Add to match ───────────────────────────────────────
+    // Open matches: auto-confirm. Private matches: pending approval.
     const playerStatus = match.visibility === 'open' ? 'confirmed' : 'pending';
+    const paymentStatus = costPerPlayer > 0 ? 'success' : 'pending';
 
     await client.query(
-      `INSERT INTO match_players (match_id, player_id, status)
-       VALUES ($1, $2, $3)`,
-      [match.id, req.user.id, playerStatus]
+      `INSERT INTO match_players (match_id, player_id, status, payment_status)
+       VALUES ($1, $2, $3, $4)`,
+      [match.id, playerId, playerStatus, paymentStatus]
     );
 
-    // Update player count if confirmed
+    let newCount = match.current_players;
+    let newStatus = match.status;
+
     if (playerStatus === 'confirmed') {
-      const newCount = match.current_players + 1;
-      const newStatus = newCount >= match.team_size ? 'full' : 'open';
+      newCount = match.current_players + 1;
+      newStatus = newCount >= match.team_size ? 'full' : 'open';
 
       await client.query(
         `UPDATE matches SET current_players = $1, status = $2 WHERE id = $3`,
@@ -343,7 +405,7 @@ const joinMatch = async (req, res, next) => {
 
     await client.query('COMMIT');
 
-    // Notify organizer via socket
+    // ── Socket notifications ───────────────────────────────
     try {
       const io = getIO();
       io.to(`user:${match.organizer_id}`).emit('new_notification', {
@@ -354,32 +416,49 @@ const joinMatch = async (req, res, next) => {
           : 'requested to join'} your match "${match.title}"`,
         data: { match_id: match.id },
       });
-
-      // Broadcast to match room
       io.to(`match:${match.id}`).emit('player_joined', {
-        player: { id: req.user.id, name: req.user.name },
-        current_players: match.current_players + (playerStatus === 'confirmed' ? 1 : 0),
+        player: { id: playerId, name: req.user.name },
+        current_players: newCount,
       });
-    } catch (_) {}
+      if (newStatus === 'full') {
+        io.to(`match:${match.id}`).emit('match_full', { match_id: match.id });
+      }
+    } catch (_) { /* non-critical */ }
 
     res.status(201).json({
       success: true,
       message: playerStatus === 'confirmed'
-        ? 'You joined the match! 🎉'
+        ? `You joined the match! 🎉${costPerPlayer > 0 ? ` ₹${costPerPlayer.toFixed(2)} deducted from wallet.` : ''}`
         : 'Join request sent! Waiting for organizer approval.',
-      data: { match_id: match.id, status: playerStatus },
+      data: {
+        match_id: match.id,
+        status: playerStatus,
+        payment_status: paymentStatus,
+        payment: paymentResult,
+      },
     });
   } catch (err) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch (_) {}
+
+    // Friendly error for insufficient balance
+    if (err.message && err.message.includes('Insufficient balance')) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+        code: 'INSUFFICIENT_BALANCE',
+      });
+    }
     next(err);
   } finally {
     client.release();
   }
 };
 
-// @desc    Approve or reject join request
+// ─────────────────────────────────────────────────────────────
+// @desc    Approve or reject join request (organizer only)
 // @route   PUT /api/matches/:id/players/:playerId
-// @access  Private (organizer only)
+// @access  Private (organizer)
+// ─────────────────────────────────────────────────────────────
 const handleJoinRequest = async (req, res, next) => {
   const client = await getClient();
   try {
@@ -387,11 +466,13 @@ const handleJoinRequest = async (req, res, next) => {
     const { action } = req.body; // 'approve' | 'reject'
 
     if (!['approve', 'reject'].includes(action))
-      return res.status(400).json({ success: false, message: 'Action must be approve or reject.' });
+      return res.status(400).json({
+        success: false,
+        message: 'Action must be approve or reject.',
+      });
 
     await client.query('BEGIN');
 
-    // Verify organizer
     const matchResult = await client.query(
       `SELECT m.*, b.organizer_id FROM matches m
        JOIN bookings b ON m.booking_id = b.id
@@ -408,7 +489,10 @@ const handleJoinRequest = async (req, res, next) => {
 
     if (match.organizer_id !== req.user.id) {
       await client.query('ROLLBACK');
-      return res.status(403).json({ success: false, message: 'Only organizer can manage requests.' });
+      return res.status(403).json({
+        success: false,
+        message: 'Only organizer can manage requests.',
+      });
     }
 
     if (action === 'approve' && match.current_players >= match.team_size) {
@@ -419,7 +503,8 @@ const handleJoinRequest = async (req, res, next) => {
     const newStatus = action === 'approve' ? 'confirmed' : 'rejected';
 
     await client.query(
-      `UPDATE match_players SET status = $1 WHERE match_id = $2 AND player_id = $3`,
+      `UPDATE match_players SET status = $1
+       WHERE match_id = $2 AND player_id = $3`,
       [newStatus, id, playerId]
     );
 
@@ -434,7 +519,6 @@ const handleJoinRequest = async (req, res, next) => {
 
     await client.query('COMMIT');
 
-    // Notify player
     try {
       const io = getIO();
       io.to(`user:${playerId}`).emit('new_notification', {
@@ -445,7 +529,6 @@ const handleJoinRequest = async (req, res, next) => {
           : `Your request to join "${match.title}" was declined.`,
         data: { match_id: id },
       });
-
       if (action === 'approve') {
         io.to(`match:${id}`).emit('player_joined', {
           player: { id: playerId },
@@ -466,19 +549,39 @@ const handleJoinRequest = async (req, res, next) => {
   }
 };
 
-// @desc    Leave a match
-// @route   DELETE /api/matches/:id/leave
+// ─────────────────────────────────────────────────────────────
+// @desc    Leave a match (with wallet refund)
+// @route   POST /api/matches/:id/leave
 // @access  Private (player)
+//
+// Business rules enforced here:
+//   • Organizer cannot leave — must cancel.
+//   • Cannot leave after payment is 'released' (settlement done).
+//   • If payment is 'held':
+//       – >= 3 hours before match  →  80% refund, 10% admin, 10% owner
+//       –  < 3 hours before match  →  no refund allowed
+//   • If cost was 0, player is simply removed.
+//   • Creator wallet MUST have enough balance to cover the debit.
+//     If not, the leave is rejected — no partial/asymmetric reversals.
+// ─────────────────────────────────────────────────────────────
 const leaveMatch = async (req, res, next) => {
   const client = await getClient();
   try {
     const { id } = req.params;
+    const playerId = req.user.id;
 
     await client.query('BEGIN');
 
+    // Lock match row
     const matchResult = await client.query(
-      `SELECT m.*, b.organizer_id FROM matches m
+      `SELECT m.*, b.organizer_id,
+        t.owner_id,
+        ts.date as match_date,
+        ts.start_time
+       FROM matches m
        JOIN bookings b ON m.booking_id = b.id
+       JOIN time_slots ts ON b.slot_id = ts.id
+       JOIN turfs t ON ts.turf_id = t.id
        WHERE m.id = $1 FOR UPDATE`,
       [id]
     );
@@ -490,7 +593,7 @@ const leaveMatch = async (req, res, next) => {
 
     const match = matchResult.rows[0];
 
-    if (match.organizer_id === req.user.id) {
+    if (match.organizer_id === playerId) {
       await client.query('ROLLBACK');
       return res.status(400).json({
         success: false,
@@ -498,34 +601,183 @@ const leaveMatch = async (req, res, next) => {
       });
     }
 
+    if (match.status === 'completed') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot leave a completed match.',
+      });
+    }
+
+    // Verify player is actually confirmed in this match
     const playerResult = await client.query(
-      `DELETE FROM match_players
+      `SELECT id FROM match_players
        WHERE match_id = $1 AND player_id = $2 AND status = 'confirmed'
-       RETURNING id`,
-      [id, req.user.id]
+       FOR UPDATE`,
+      [id, playerId]
     );
 
     if (!playerResult.rows.length) {
       await client.query('ROLLBACK');
-      return res.status(400).json({ success: false, message: 'You are not in this match.' });
+      return res.status(400).json({
+        success: false,
+        message: 'You are not confirmed in this match.',
+      });
     }
 
-    // Decrease player count
-    const newCount = Math.max(0, match.current_players - 1);
+    // Get payment record (locked)
+    const paymentResult = await client.query(
+      `SELECT id, amount, status FROM match_payments
+       WHERE match_id = $1 AND player_id = $2
+       FOR UPDATE`,
+      [id, playerId]
+    );
+
+    let refundSummary = null;
+
+    if (paymentResult.rows.length > 0) {
+      const payment = paymentResult.rows[0];
+
+      if (payment.status === 'released') {
+        await client.query('ROLLBACK');
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot leave — match settlement is already done.',
+        });
+      }
+
+      if (payment.status === 'held') {
+        const paidAmount = parseFloat(payment.amount);
+
+        if (paidAmount > 0) {
+          // ── Time check (>= 3 hours required for any refund) ──────────
+          const matchDateTime = new Date(
+            `${match.match_date}T${match.start_time}`
+          );
+          const hoursUntil = (matchDateTime - new Date()) / (1000 * 60 * 60);
+
+          if (hoursUntil < 3) {
+            await client.query('ROLLBACK');
+            return res.status(400).json({
+              success: false,
+              message: `Refund not allowed. Match starts in ${hoursUntil.toFixed(1)} hours. Minimum 3 hours required.`,
+              code: 'REFUND_WINDOW_PASSED',
+            });
+          }
+
+          // ── Get admin user ────────────────────────────────────────────
+          const adminResult = await client.query(
+            `SELECT id FROM users WHERE role = 'admin' LIMIT 1`
+          );
+          if (!adminResult.rows.length) {
+            await client.query('ROLLBACK');
+            return res.status(500).json({
+              success: false,
+              message: 'System error: admin user not found.',
+            });
+          }
+          const adminId = adminResult.rows[0].id;
+
+          // ── Calculate split ───────────────────────────────────────────
+          const refundToPlayer    = parseFloat((paidAmount * 0.80).toFixed(2));
+          const platformFeeAmount = parseFloat((paidAmount * 0.10).toFixed(2));
+          const penaltyAmount     = parseFloat((paidAmount * 0.10).toFixed(2));
+
+          const { debitWallet, creditWallet } = require('../services/walletService');
+
+          // IMPORTANT: Debit creator FIRST. If creator can't cover it,
+          // the entire transaction rolls back — no asymmetric state.
+          await debitWallet(
+            client, match.organizer_id, paidAmount,
+            'match_refund', match.id, 'match',
+            `Refund processed — player left match: ${match.title}`,
+            { match_id: id, player_id: playerId }
+          );
+
+          // Credit player (80%)
+          await creditWallet(
+            client, playerId, refundToPlayer,
+            'match_refund', match.id, 'match',
+            `Refund for leaving match: ${match.title} (80%)`,
+            { match_id: id }
+          );
+
+          // Credit admin (10% platform fee)
+          await creditWallet(
+            client, adminId, platformFeeAmount,
+            'settlement_platform_fee', match.id, 'match',
+            `Platform fee — match refund: ${match.title}`,
+            { match_id: id, player_id: playerId }
+          );
+
+          // Credit turf owner (10% penalty)
+          await creditWallet(
+            client, match.owner_id, penaltyAmount,
+            'cancellation_penalty', match.id, 'match',
+            `Cancellation penalty: ${match.title}`,
+            { match_id: id, player_id: playerId }
+          );
+
+          // Mark payment as refunded
+          await client.query(
+            `UPDATE match_payments SET status = 'refunded', updated_at = NOW()
+             WHERE id = $1`,
+            [payment.id]
+          );
+
+          refundSummary = {
+            paid_amount: paidAmount,
+            refund_to_player: refundToPlayer,
+            platform_fee: platformFeeAmount,
+            owner_penalty: penaltyAmount,
+            hours_until_match: hoursUntil.toFixed(1),
+          };
+
+          // Log in refunds table
+          const bookingRow = await client.query(
+            `SELECT booking_id FROM matches WHERE id = $1`, [id]
+          );
+          if (bookingRow.rows.length) {
+            await client.query(
+              `INSERT INTO refunds
+                (booking_id, user_id, amount, reason, status,
+                 refunded_amount, platform_fee_amount, penalty_amount)
+               VALUES ($1,$2,$3,$4,'completed',$5,$6,$7)`,
+              [
+                bookingRow.rows[0].booking_id, playerId,
+                paidAmount, 'Player left match before start',
+                refundToPlayer, platformFeeAmount, penaltyAmount,
+              ]
+            );
+          }
+        }
+      }
+    }
+
+    // ── Remove player from match ────────────────────────────────────
     await client.query(
-      `UPDATE matches SET current_players = $1,
-        status = CASE WHEN status = 'full' THEN 'open' ELSE status END
-       WHERE id = $2`,
-      [newCount, id]
+      `DELETE FROM match_players WHERE match_id = $1 AND player_id = $2`,
+      [id, playerId]
+    );
+
+    // Minimum 1 to preserve organizer slot count
+    const newCount = Math.max(1, match.current_players - 1);
+    const newStatus = (match.status === 'full' && newCount < match.team_size)
+      ? 'open'
+      : match.status;
+
+    await client.query(
+      `UPDATE matches SET current_players = $1, status = $2 WHERE id = $3`,
+      [newCount, newStatus, id]
     );
 
     await client.query('COMMIT');
 
-    // Notify match room
+    // ── Socket notifications ────────────────────────────────────────
     try {
       const io = getIO();
       io.to(`match:${id}`).emit('player_left', {
-        player_id: req.user.id,
+        player_id: playerId,
         current_players: newCount,
       });
       io.to(`user:${match.organizer_id}`).emit('new_notification', {
@@ -536,21 +788,43 @@ const leaveMatch = async (req, res, next) => {
       });
     } catch (_) {}
 
-    res.json({ success: true, message: 'You left the match.' });
+    const paidAmount = refundSummary?.paid_amount || 0;
+
+    res.json({
+      success: true,
+      message: paidAmount > 0
+        ? `Left match. ₹${refundSummary.refund_to_player} refunded to your wallet (80%).`
+        : 'You have left the match.',
+      data: refundSummary || {},
+    });
   } catch (err) {
-    await client.query('ROLLBACK');
+    try { await client.query('ROLLBACK'); } catch (_) {}
+
+    // Surface refund-window errors cleanly
+    if (err.message && (
+      err.message.includes('Refund not allowed') ||
+      err.message.includes('Insufficient balance')
+    )) {
+      return res.status(400).json({
+        success: false,
+        message: err.message,
+        code: err.message.includes('Insufficient') ? 'INSUFFICIENT_BALANCE' : 'REFUND_WINDOW_PASSED',
+      });
+    }
     next(err);
   } finally {
     client.release();
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Get my matches (as organizer or player)
 // @route   GET /api/matches/my
 // @access  Private
+// ─────────────────────────────────────────────────────────────
 const getMyMatches = async (req, res, next) => {
   try {
-    const { role = 'all' } = req.query; // 'organizer' | 'player' | 'all'
+    const { role = 'all' } = req.query;
 
     let matchIds = new Set();
 
@@ -603,9 +877,11 @@ const getMyMatches = async (req, res, next) => {
   }
 };
 
-// @desc    Cancel match (organizer only)
+// ─────────────────────────────────────────────────────────────
+// @desc    Cancel match (organizer or admin)
 // @route   PUT /api/matches/:id/cancel
-// @access  Private (organizer)
+// @access  Private
+// ─────────────────────────────────────────────────────────────
 const cancelMatch = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -628,7 +904,6 @@ const cancelMatch = async (req, res, next) => {
       [id]
     );
 
-    // Notify all players
     const players = await query(
       `SELECT player_id FROM match_players WHERE match_id = $1 AND status = 'confirmed'`,
       [id]
@@ -653,7 +928,108 @@ const cancelMatch = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
+// @desc    Update match status (admin/organizer)
+// @route   PATCH /api/matches/:id/status
+// @access  Private
+// ─────────────────────────────────────────────────────────────
+const updateMatchStatus = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const { status } = req.body;
+
+    const validStatuses = ['open', 'full', 'ongoing', 'completed', 'cancelled'];
+    if (!validStatuses.includes(status))
+      return res.status(400).json({
+        success: false,
+        message: `Invalid status. Must be one of: ${validStatuses.join(', ')}`,
+      });
+
+    const result = await query(
+      `SELECT m.*, b.organizer_id FROM matches m
+       JOIN bookings b ON m.booking_id = b.id
+       WHERE m.id = $1`,
+      [id]
+    );
+
+    if (!result.rows.length)
+      return res.status(404).json({ success: false, message: 'Match not found.' });
+
+    if (result.rows[0].organizer_id !== req.user.id && req.user.role !== 'admin')
+      return res.status(403).json({ success: false, message: 'Not authorized.' });
+
+    const updatedMatch = await query(
+      `UPDATE matches SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [status, id]
+    );
+
+    try {
+      const io = getIO();
+      io.to(`match:${id}`).emit('match_updated', { status });
+    } catch (_) {}
+
+    res.json({
+      success: true,
+      message: `Match status updated to ${status}`,
+      data: updatedMatch.rows[0],
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+// ─────────────────────────────────────────────────────────────
+// @desc    Delete match (admin only)
+// @route   DELETE /api/matches/:id
+// @access  Private (admin)
+// ─────────────────────────────────────────────────────────────
+const deleteMatch = async (req, res, next) => {
+  const client = await getClient();
+  try {
+    if (req.user.role !== 'admin')
+      return res.status(403).json({
+        success: false,
+        message: 'Only admin can delete matches.',
+      });
+
+    await client.query('BEGIN');
+
+    const result = await client.query(
+      `SELECT id FROM matches WHERE id = $1 FOR UPDATE`,
+      [req.params.id]
+    );
+
+    if (!result.rows.length) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Match not found.' });
+    }
+
+    await client.query('DELETE FROM matches WHERE id = $1', [req.params.id]);
+
+    await client.query('COMMIT');
+
+    res.json({ success: true, message: 'Match deleted successfully.' });
+  } catch (err) {
+    await client.query('ROLLBACK');
+    next(err);
+  } finally {
+    client.release();
+  }
+};
+
+// Alias — routes file may import either name
+const getMatchById = getMatch;
+
 module.exports = {
-  createMatch, getMatches, getMatch, joinMatch,
-  handleJoinRequest, leaveMatch, getMyMatches, cancelMatch,
+  createMatch,
+  getMatches,
+  getMatch,
+  getMatchById,
+  joinMatch,
+  handleJoinRequest,
+  leaveMatch,
+  getMyMatches,
+  cancelMatch,
+  updateMatchStatus,
+  deleteMatch,
 };

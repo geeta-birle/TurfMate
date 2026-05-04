@@ -17,7 +17,6 @@ const BookingSuccess = () => {
       flex items-center justify-center px-4">
       <div className="max-w-md w-full text-center">
 
-        {/* Success Animation */}
         <div className="w-24 h-24 bg-green-100 rounded-full flex items-center
           justify-center mx-auto mb-6 animate-bounce">
           <span className="text-5xl">✅</span>
@@ -70,4 +69,5 @@ const BookingSuccess = () => {
     </div>
   );
 };
+
 export default BookingSuccess;

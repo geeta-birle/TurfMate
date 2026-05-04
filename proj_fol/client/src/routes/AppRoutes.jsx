@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import ProtectedRoute from '../components/common/ProtectedRoute';
+import MyRefunds from "../pages/refunds/MyRefunds";
 
 import VerifyEmail     from '../pages/auth/VerifyEmail';
 import ForgotPassword  from '../pages/auth/ForgotPassword';
@@ -26,6 +27,8 @@ import AdminDashboard  from '../pages/dashboard/AdminDashboard';
 import Profile         from '../pages/profile/Profile';
 import Notifications   from '../pages/Notifications';
 import PlayerProfile   from '../pages/player/PlayerProfile';
+
+import Wallet from '../pages/wallet/Wallet';
 
 const AppRoutes = () => {
   const { user } = useAuth();
@@ -121,6 +124,18 @@ const AppRoutes = () => {
       <Route path="/verify-email" element={<VerifyEmail />} />
       <Route path="/forgot-password" element={<ForgotPassword />} />
       <Route path="/reset-password" element={<ResetPassword />} />
+
+
+            
+      // inside your routes
+      <Route path="/refunds/my" element={<ProtectedRoute><MyRefunds /></ProtectedRoute>} />
+
+
+
+      // wallet route
+      <Route path="/wallet" element={
+        <ProtectedRoute><Wallet /></ProtectedRoute>
+      } />
       {/* ── 404 ─────────────────────────────────── */}
       <Route path="*" element={
         <div className="flex flex-col items-center justify-center
