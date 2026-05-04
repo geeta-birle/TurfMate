@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { matchService } from '../../services/matchService';
 import { refundService } from '../../services/refundService';
@@ -30,13 +30,24 @@ const MatchDetail = () => {
   const [activeTab, setActiveTab] = useState('details');
   const [pendingRefunds, setPendingRefunds] = useState([]);
 
-  useEffect(() => { fetchMatch(); }, [id]);
+  const fetchMatch = useCallback(async () => {
+    try {
+      const { data } = await matchService.getOne(id);
+      setMatch(data.data);
+    } catch {
+      setError('Match not found.');
+    } finally {
+      setLoading(false);
+    }
+  }, [id]);
+
+  useEffect(() => { fetchMatch(); }, [fetchMatch]);
 
   useEffect(() => {
     if (!match || !socket) return;
     joinMatchRoom(id);
 
-    socket.on('player_joined', ({ player, current_players }) => {
+    socket.on('player_joined', ({ current_players }) => {
       setMatch(prev => ({
         ...prev,
         current_players,
@@ -58,29 +69,19 @@ const MatchDetail = () => {
       socket.off('player_left');
       socket.off('match_updated');
     };
-  }, [match?.id, socket]);
+  }, [id, match, socket, joinMatchRoom, leaveMatchRoom]);
 
   // Fetch pending refunds when organizer opens refunds tab
   useEffect(() => {
-    if (activeTab === 'refunds' && isOrganizer) {
+    const isOrganizerCheck = user && match?.organizer_id === user.id;
+    if (activeTab === 'refunds' && isOrganizerCheck) {
       refundService.getPending()
         .then(({ data }) => setPendingRefunds(
           data.data.filter(r => r.match_id === id)
         ))
         .catch(() => {});
     }
-  }, [activeTab]);
-
-  const fetchMatch = async () => {
-    try {
-      const { data } = await matchService.getOne(id);
-      setMatch(data.data);
-    } catch {
-      setError('Match not found.');
-    } finally {
-      setLoading(false);
-    }
-  };
+  }, [activeTab, id, user, match?.organizer_id]);
 
   const isOrganizer = user && match?.organizer_id === user.id;
   const isPlayer    = match?.players?.some(p => p.player_id === user?.id);
