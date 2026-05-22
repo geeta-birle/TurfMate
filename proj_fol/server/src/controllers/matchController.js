@@ -407,6 +407,24 @@ const joinMatch = async (req, res, next) => {
 
     // ── Socket notifications ───────────────────────────────
     try {
+      // Fetch updated players list for broadcast
+      const updatedPlayers = await query(
+        `SELECT mp.*, u.name, u.avatar_url, u.skill_level, u.city
+         FROM match_players mp
+         JOIN users u ON mp.player_id = u.id
+         WHERE mp.match_id = $1 AND mp.status = 'confirmed'
+         ORDER BY mp.joined_at ASC`,
+        [match.id]
+      );
+      
+      const updatedPending = await query(
+        `SELECT mp.*, u.name, u.avatar_url, u.skill_level
+         FROM match_players mp
+         JOIN users u ON mp.player_id = u.id
+         WHERE mp.match_id = $1 AND mp.status = 'pending'`,
+        [match.id]
+      );
+
       const io = getIO();
       io.to(`user:${match.organizer_id}`).emit('new_notification', {
         type: playerStatus === 'confirmed' ? 'player_joined' : 'join_request',
@@ -419,6 +437,8 @@ const joinMatch = async (req, res, next) => {
       io.to(`match:${match.id}`).emit('player_joined', {
         player: { id: playerId, name: req.user.name },
         current_players: newCount,
+        players: updatedPlayers.rows,
+        pending_requests: updatedPending.rows,
       });
       if (newStatus === 'full') {
         io.to(`match:${match.id}`).emit('match_full', { match_id: match.id });
@@ -530,9 +550,29 @@ const handleJoinRequest = async (req, res, next) => {
         data: { match_id: id },
       });
       if (action === 'approve') {
+        // Fetch updated player lists
+        const updatedPlayers = await query(
+          `SELECT mp.*, u.name, u.avatar_url, u.skill_level, u.city
+           FROM match_players mp
+           JOIN users u ON mp.player_id = u.id
+           WHERE mp.match_id = $1 AND mp.status = 'confirmed'
+           ORDER BY mp.joined_at ASC`,
+          [id]
+        );
+        
+        const updatedPending = await query(
+          `SELECT mp.*, u.name, u.avatar_url, u.skill_level
+           FROM match_players mp
+           JOIN users u ON mp.player_id = u.id
+           WHERE mp.match_id = $1 AND mp.status = 'pending'`,
+          [id]
+        );
+
         io.to(`match:${id}`).emit('player_joined', {
           player: { id: playerId },
           current_players: match.current_players + 1,
+          players: updatedPlayers.rows,
+          pending_requests: updatedPending.rows,
         });
       }
     } catch (_) {}
@@ -775,10 +815,30 @@ const leaveMatch = async (req, res, next) => {
 
     // ── Socket notifications ────────────────────────────────────────
     try {
+      // Fetch updated players list for broadcast
+      const updatedPlayers = await query(
+        `SELECT mp.*, u.name, u.avatar_url, u.skill_level, u.city
+         FROM match_players mp
+         JOIN users u ON mp.player_id = u.id
+         WHERE mp.match_id = $1 AND mp.status = 'confirmed'
+         ORDER BY mp.joined_at ASC`,
+        [id]
+      );
+      
+      const updatedPending = await query(
+        `SELECT mp.*, u.name, u.avatar_url, u.skill_level
+         FROM match_players mp
+         JOIN users u ON mp.player_id = u.id
+         WHERE mp.match_id = $1 AND mp.status = 'pending'`,
+        [id]
+      );
+
       const io = getIO();
       io.to(`match:${id}`).emit('player_left', {
         player_id: playerId,
         current_players: newCount,
+        players: updatedPlayers.rows,
+        pending_requests: updatedPending.rows,
       });
       io.to(`user:${match.organizer_id}`).emit('new_notification', {
         type: 'player_left',

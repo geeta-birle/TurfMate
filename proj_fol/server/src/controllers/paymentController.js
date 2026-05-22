@@ -16,6 +16,15 @@ const createOrder = async (req, res, next) => {
   try {
     const { booking_id } = req.body;
 
+    // Validate input
+    if (!booking_id) {
+      return res.status(400).json({ success: false, message: 'Booking ID is required.' });
+    }
+
+    if (!req.user || !req.user.id) {
+      return res.status(401).json({ success: false, message: 'User authentication failed.' });
+    }
+
     const result = await query(
       `SELECT b.*, b.total_amount + b.platform_fee as payable_amount,
         ts.date, ts.start_time, ts.end_time,
@@ -27,10 +36,27 @@ const createOrder = async (req, res, next) => {
       [booking_id, req.user.id]
     );
 
+    // Validate result
+    if (!result || !result.rows) {
+      console.error('[Payment] Query result is invalid:', result);
+      return res.status(500).json({ success: false, message: 'Database query failed.' });
+    }
+
     if (!result.rows.length)
       return res.status(404).json({ success: false, message: 'Booking not found.' });
 
     const booking = result.rows[0];
+
+    // Validate booking object
+    if (!booking) {
+      console.error('[Payment] Booking object is null/undefined');
+      return res.status(500).json({ success: false, message: 'Failed to retrieve booking details.' });
+    }
+
+    if (!booking.status) {
+      console.error('[Payment] Booking status is missing:', booking);
+      return res.status(500).json({ success: false, message: 'Booking status not found.' });
+    }
 
     if (booking.status === 'confirmed')
       return res.status(400).json({ success: false, message: 'Booking already paid.' });

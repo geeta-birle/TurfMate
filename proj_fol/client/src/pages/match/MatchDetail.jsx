@@ -12,6 +12,17 @@ const SPORT_ICONS = {
   badminton: '🏸', tennis: '🎾', volleyball: '🏐',
 };
 
+// Helper: Deduplicate players by player_id
+const deduplicatePlayers = (players) => {
+  if (!players || !Array.isArray(players)) return [];
+  const seen = new Set();
+  return players.filter(p => {
+    if (seen.has(p.player_id)) return false;
+    seen.add(p.player_id);
+    return true;
+  });
+};
+
 const MatchDetail = () => {
   const { id } = useParams();
   const { user } = useAuth();
@@ -33,7 +44,11 @@ const MatchDetail = () => {
   const fetchMatch = useCallback(async () => {
     try {
       const { data } = await matchService.getOne(id);
-      setMatch(data.data);
+      const matchData = data.data;
+      // Deduplicate players list
+      if (matchData.players) matchData.players = deduplicatePlayers(matchData.players);
+      if (matchData.pending_requests) matchData.pending_requests = deduplicatePlayers(matchData.pending_requests);
+      setMatch(matchData);
     } catch {
       setError('Match not found.');
     } finally {
@@ -47,29 +62,46 @@ const MatchDetail = () => {
     if (!match || !socket) return;
     joinMatchRoom(id);
 
-    socket.on('player_joined', ({ current_players }) => {
+    const handlePlayerJoined = ({ current_players, players, pending_requests }) => {
       setMatch(prev => ({
         ...prev,
         current_players,
+        players: deduplicatePlayers(players || prev.players),
+        pending_requests: deduplicatePlayers(pending_requests || prev.pending_requests),
         status: current_players >= prev.team_size ? 'full' : 'open',
       }));
-    });
+    };
 
-    socket.on('player_left', ({ current_players }) => {
-      setMatch(prev => ({ ...prev, current_players, status: 'open' }));
-    });
+    const handlePlayerLeft = ({ current_players, players, pending_requests }) => {
+      setMatch(prev => ({ 
+        ...prev, 
+        current_players,
+        players: deduplicatePlayers(players || prev.players),
+        pending_requests: deduplicatePlayers(pending_requests || prev.pending_requests),
+        status: 'open' 
+      }));
+    };
 
-    socket.on('match_updated', (updates) => {
-      setMatch(prev => ({ ...prev, ...updates }));
-    });
+    const handleMatchUpdated = (updates) => {
+      setMatch(prev => {
+        const merged = { ...prev, ...updates };
+        if (merged.players) merged.players = deduplicatePlayers(merged.players);
+        if (merged.pending_requests) merged.pending_requests = deduplicatePlayers(merged.pending_requests);
+        return merged;
+      });
+    };
+
+    socket.on('player_joined', handlePlayerJoined);
+    socket.on('player_left', handlePlayerLeft);
+    socket.on('match_updated', handleMatchUpdated);
 
     return () => {
       leaveMatchRoom(id);
-      socket.off('player_joined');
-      socket.off('player_left');
-      socket.off('match_updated');
+      socket.off('player_joined', handlePlayerJoined);
+      socket.off('player_left', handlePlayerLeft);
+      socket.off('match_updated', handleMatchUpdated);
     };
-  }, [id, match, socket, joinMatchRoom, leaveMatchRoom]);
+  }, [id, socket, joinMatchRoom, leaveMatchRoom]);
 
   // Fetch pending refunds when organizer opens refunds tab
   useEffect(() => {

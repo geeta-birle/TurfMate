@@ -20,8 +20,9 @@ const turfValidation = [
 // Public
 router.get('/', getTurfs);
 router.get('/my', protect, authorize('owner'), getMyTurfs);
-router.get('/:id', getTurf);
+// IMPORTANT: specific routes before generic /:id
 router.get('/:id/slots', getSlots);
+router.get('/:id', getTurf);
 
 // Owner only
 router.post('/', protect, authorize('owner'), turfValidation, createTurf);

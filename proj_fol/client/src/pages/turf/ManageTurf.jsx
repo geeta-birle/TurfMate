@@ -17,11 +17,11 @@ const ManageTurf = () => {
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [selectedDate, setSelectedDate] = useState(
-    new Date().toISOString().split('T')[0]
+    new Date().toLocaleDateString('en-CA')
   );
   const [genForm, setGenForm] = useState({
-    start_date: new Date().toISOString().split('T')[0],
-    end_date: new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+    start_date: new Date().toLocaleDateString('en-CA'),
+    end_date: new Date(Date.now() + 30 * 86400000).toLocaleDateString('en-CA'),
     open_time: '06:00',
     close_time: '22:00',
     slot_duration: 60,
@@ -225,7 +225,7 @@ const ManageTurf = () => {
           {/* Date Selector */}
           <div className="flex gap-2 overflow-x-auto pb-2 mb-5">
             {next7Days.map((d, i) => {
-              const dateStr = d.toISOString().split('T')[0];
+              const dateStr = d.toLocaleDateString('en-CA');
               const isSelected = selectedDate === dateStr;
               return (
                 <button key={i} onClick={() => setSelectedDate(dateStr)}

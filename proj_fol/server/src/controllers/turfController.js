@@ -6,9 +6,11 @@ const {
 } = require('../utils/helpers');
 const { validationResult } = require('express-validator');
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Create turf
 // @route   POST /api/turfs
 // @access  Private (owner only)
+// ─────────────────────────────────────────────────────────────
 const createTurf = async (req, res, next) => {
   try {
     const errors = validationResult(req);
@@ -46,9 +48,11 @@ const createTurf = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Get all turfs (with search + filter)
 // @route   GET /api/turfs
 // @access  Public
+// ─────────────────────────────────────────────────────────────
 const getTurfs = async (req, res, next) => {
   try {
     const {
@@ -124,9 +128,11 @@ const getTurfs = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Get single turf
 // @route   GET /api/turfs/:id
 // @access  Public
+// ─────────────────────────────────────────────────────────────
 const getTurf = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -164,9 +170,11 @@ const getTurf = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Update turf
 // @route   PUT /api/turfs/:id
 // @access  Private (owner only)
+// ─────────────────────────────────────────────────────────────
 const updateTurf = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -186,18 +194,18 @@ const updateTurf = async (req, res, next) => {
 
     const result = await query(
       `UPDATE turfs SET
-        name          = COALESCE($1,  name),
-        description   = COALESCE($2,  description),
-        address       = COALESCE($3,  address),
-        city          = COALESCE($4,  city),
-        lat           = COALESCE($5,  lat),
-        lng           = COALESCE($6,  lng),
-        sport_types   = COALESCE($7,  sport_types),
-        surface_type  = COALESCE($8,  surface_type),
-        amenities     = COALESCE($9,  amenities),
+        name           = COALESCE($1,  name),
+        description    = COALESCE($2,  description),
+        address        = COALESCE($3,  address),
+        city           = COALESCE($4,  city),
+        lat            = COALESCE($5,  lat),
+        lng            = COALESCE($6,  lng),
+        sport_types    = COALESCE($7,  sport_types),
+        surface_type   = COALESCE($8,  surface_type),
+        amenities      = COALESCE($9,  amenities),
         price_per_hour = COALESCE($10, price_per_hour),
-        is_active     = COALESCE($11, is_active),
-        updated_at    = NOW()
+        is_active      = COALESCE($11, is_active),
+        updated_at     = NOW()
        WHERE id = $12
        RETURNING *`,
       [name, description, address, city, lat, lng,
@@ -214,9 +222,11 @@ const updateTurf = async (req, res, next) => {
   }
 };
 
-// @desc    Delete turf
+// ─────────────────────────────────────────────────────────────
+// @desc    Delete turf (soft delete)
 // @route   DELETE /api/turfs/:id
 // @access  Private (owner only)
+// ─────────────────────────────────────────────────────────────
 const deleteTurf = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -237,50 +247,76 @@ const deleteTurf = async (req, res, next) => {
   }
 };
 
-// ─── SLOT MANAGEMENT ─────────────────────────────────────
-
-// @desc    Get available slots for a turf
-// @route   GET /api/turfs/:id/slots
+// ─────────────────────────────────────────────────────────────
+// @desc    Get available slots for a turf on a given date
+// @route   GET /api/turfs/:id/slots?date=YYYY-MM-DD
+// @access  Public
+//
+// Timezone strategy:
+//   DB timezone = Asia/Calcutta (IST). CURRENT_DATE and CURRENT_TIME
+//   in the SQL query are already in IST — no conversion needed there.
+//
+//   On the JS side we must NOT use toISOString() to extract the date
+//   string from a pg Date object, because toISOString() converts to UTC
+//   and shifts the date back 5.5 hours (e.g. 2026-05-08 → 2026-05-07).
+//   Instead we use getFullYear/getMonth/getDate which read local time.
+// ─────────────────────────────────────────────────────────────
+// @desc    Get slots for a turf by date (filters past slots)
+// @route   GET /api/turfs/:id/slots?date=YYYY-MM-DD
 // @access  Public
 const getSlots = async (req, res, next) => {
   try {
-    const { id } = req.params;
-    const { date, month } = req.query;
+    const { id }   = req.params;
+    const { date } = req.query;
 
-    let conditions = ['turf_id = $1'];
-    let params = [id];
-    let idx = 2;
+    if (!date)
+      return res.status(400).json({
+        success: false, message: 'date query param is required.',
+      });
 
-    if (date) {
-      conditions.push(`date = $${idx++}`);
-      params.push(date);
-    } else if (month) {
-      conditions.push(
-        `DATE_TRUNC('month', date) = DATE_TRUNC('month', $${idx++}::date)`
-      );
-      params.push(month);
-    } else {
-      conditions.push(
-        `date >= CURRENT_DATE AND date <= CURRENT_DATE + INTERVAL '7 days'`
-      );
-    }
+    // Compare dates as strings to avoid timezone issues
+    // Both date and CURRENT_DATE are YYYY-MM-DD format in PostgreSQL
+    const isPastDate = await query(
+      `SELECT $1::date < CURRENT_DATE AS is_past`,
+      [date]
+    );
 
+    if (isPastDate.rows[0]?.is_past)
+      return res.status(400).json({
+        success:  false,
+        message:  'Cannot view slots for past dates.',
+        code:     'PAST_DATE',
+      });
+
+    // Get slots for this date
+    // For today: exclude slots where start_time has already passed
+    // For future dates: return all slots
     const result = await query(
-      `SELECT * FROM time_slots
-       WHERE ${conditions.join(' AND ')}
-       ORDER BY date, start_time`,
-      params
+      `SELECT ts.*,
+              CASE
+                WHEN ts.status = 'booked'  THEN 'booked'
+                WHEN ts.status = 'blocked' THEN 'blocked'
+                ELSE 'available'
+              END AS effective_status
+       FROM time_slots ts
+       WHERE ts.turf_id = $1
+         AND ts.date    = $2::date
+         AND NOT (
+           ts.date::date = CURRENT_DATE
+           AND (ts.date::date + ts.start_time::time) <= NOW()
+         )
+       ORDER BY ts.start_time ASC`,
+      [id, date]
     );
 
     res.json({ success: true, data: result.rows });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
-
+// ─────────────────────────────────────────────────────────────
 // @desc    Add slots manually
 // @route   POST /api/turfs/:id/slots
 // @access  Private (owner only)
+// ─────────────────────────────────────────────────────────────
 const addSlots = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -322,19 +358,20 @@ const addSlots = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Auto-generate slots for a date range
 // @route   POST /api/turfs/:id/slots/generate
 // @access  Private (owner only)
+// ─────────────────────────────────────────────────────────────
 const generateSlots = async (req, res, next) => {
   try {
     const { id } = req.params;
     const {
-      start_date,
-      end_date,
-      open_time = '06:00',
-      close_time = '22:00',
+      start_date, end_date,
+      open_time     = '06:00',
+      close_time    = '22:00',
       slot_duration = 60,
-      days_of_week = [0, 1, 2, 3, 4, 5, 6],
+      days_of_week  = [0, 1, 2, 3, 4, 5, 6],
     } = req.body;
 
     const turf = await query(
@@ -347,12 +384,12 @@ const generateSlots = async (req, res, next) => {
 
     const slots = [];
     const current = new Date(start_date);
-    const end = new Date(end_date);
+    const end     = new Date(end_date);
 
     while (current <= end) {
       if (days_of_week.includes(current.getDay())) {
         const dateStr = current.toISOString().split('T')[0];
-        const [openH, openM] = open_time.split(':').map(Number);
+        const [openH, openM]   = open_time.split(':').map(Number);
         const [closeH, closeM] = close_time.split(':').map(Number);
         let startMins = openH * 60 + openM;
         const endMins = closeH * 60 + closeM;
@@ -363,7 +400,7 @@ const generateSlots = async (req, res, next) => {
           const endH     = String(Math.floor((startMins + slot_duration) / 60)).padStart(2, '0');
           const endMin   = String((startMins + slot_duration) % 60).padStart(2, '0');
           slots.push({
-            date: dateStr,
+            date:       dateStr,
             start_time: `${startH}:${startMin}`,
             end_time:   `${endH}:${endMin}`,
           });
@@ -380,7 +417,7 @@ const generateSlots = async (req, res, next) => {
     let inserted = 0;
 
     for (let i = 0; i < slots.length; i += chunkSize) {
-      const chunk = slots.slice(i, i + chunkSize);
+      const chunk  = slots.slice(i, i + chunkSize);
       const values = chunk.map((_, j) => {
         const base = j * 4;
         return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4})`;
@@ -406,9 +443,11 @@ const generateSlots = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Block / unblock a slot
 // @route   PUT /api/turfs/:id/slots/:slotId
 // @access  Private (owner only)
+// ─────────────────────────────────────────────────────────────
 const updateSlot = async (req, res, next) => {
   try {
     const { id, slotId } = req.params;
@@ -438,9 +477,11 @@ const updateSlot = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Get owner's own turfs
 // @route   GET /api/turfs/my
 // @access  Private (owner)
+// ─────────────────────────────────────────────────────────────
 const getMyTurfs = async (req, res, next) => {
   try {
     const result = await query(
@@ -466,9 +507,11 @@ const getMyTurfs = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Add review to turf
 // @route   POST /api/turfs/:id/review
 // @access  Private (player who booked)
+// ─────────────────────────────────────────────────────────────
 const addReview = async (req, res, next) => {
   try {
     const { id } = req.params;
@@ -531,25 +574,27 @@ const addReview = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Update review
 // @route   PUT /api/turfs/:id/review/:reviewId
 // @access  Private (review owner)
+// ─────────────────────────────────────────────────────────────
 const updateReview = async (req, res, next) => {
   try {
     const { id, reviewId } = req.params;
     const { rating, comment } = req.body;
 
-    // Check if review exists and belongs to user
     const reviewCheck = await query(
       `SELECT id FROM reviews
-       WHERE id = $1 AND reviewer_id = $2 AND target_id = $3 AND target_type = 'turf'`,
+       WHERE id = $1 AND reviewer_id = $2
+       AND target_id = $3 AND target_type = 'turf'`,
       [reviewId, req.user.id, id]
     );
 
     if (!reviewCheck.rows.length)
       return res.status(404).json({
         success: false,
-        message: 'Review not found or you do not have permission to edit it.',
+        message: 'Review not found or not authorized.',
       });
 
     const client = await getClient();
@@ -558,12 +603,10 @@ const updateReview = async (req, res, next) => {
 
       const review = await client.query(
         `UPDATE reviews SET rating = $1, comment = $2
-         WHERE id = $3
-         RETURNING *`,
+         WHERE id = $3 RETURNING *`,
         [rating, comment, reviewId]
       );
 
-      // Recalculate turf ratings
       await client.query(
         `UPDATE turfs SET
           avg_rating = (
@@ -592,37 +635,34 @@ const updateReview = async (req, res, next) => {
   }
 };
 
+// ─────────────────────────────────────────────────────────────
 // @desc    Delete review
 // @route   DELETE /api/turfs/:id/review/:reviewId
 // @access  Private (review owner)
+// ─────────────────────────────────────────────────────────────
 const deleteReview = async (req, res, next) => {
   try {
     const { id, reviewId } = req.params;
 
-    // Check if review exists and belongs to user
     const reviewCheck = await query(
       `SELECT id FROM reviews
-       WHERE id = $1 AND reviewer_id = $2 AND target_id = $3 AND target_type = 'turf'`,
+       WHERE id = $1 AND reviewer_id = $2
+       AND target_id = $3 AND target_type = 'turf'`,
       [reviewId, req.user.id, id]
     );
 
     if (!reviewCheck.rows.length)
       return res.status(404).json({
         success: false,
-        message: 'Review not found or you do not have permission to delete it.',
+        message: 'Review not found or not authorized.',
       });
 
     const client = await getClient();
     try {
       await client.query('BEGIN');
 
-      // Delete the review
-      await client.query(
-        `DELETE FROM reviews WHERE id = $1`,
-        [reviewId]
-      );
+      await client.query(`DELETE FROM reviews WHERE id = $1`, [reviewId]);
 
-      // Recalculate turf ratings
       await client.query(
         `UPDATE turfs SET
           avg_rating = (
@@ -639,10 +679,7 @@ const deleteReview = async (req, res, next) => {
 
       await client.query('COMMIT');
 
-      res.status(200).json({
-        success: true,
-        message: 'Review deleted.',
-      });
+      res.status(200).json({ success: true, message: 'Review deleted.' });
     } catch (err) {
       await client.query('ROLLBACK');
       throw err;
